@@ -33,7 +33,7 @@ class Settings(BaseSettings):
             user = values.get("POSTGRES_USER")
             password = values.get("POSTGRES_PASSWORD", "")
             host = values.get("POSTGRES_HOST")
-            db = values.get("POSTGRES_DB", "phr")
+            db = values.get("POSTGRES_DB", "vaidya_md_db")
             
             # If using Cloud SQL Unix socket path
             if host and host.startswith("/"):
@@ -42,8 +42,8 @@ class Settings(BaseSettings):
         return v or "postgresql+asyncpg://vaidya_md_admin:vaidya_md_secret_2026@localhost:5432/vaidya_md_db"
 
     DB_ECHO: bool = False
-    DB_POOL_SIZE: int = 20
-    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 5
 
     # Conditional Seeding Flags
     SEED_DB: bool = False
@@ -59,7 +59,12 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE_MB: int = 50
 
     # CORS
-    CORS_ORIGINS: Union[list[str], str] = ["http://localhost:3000", "http://localhost:8000"]
+    CORS_ORIGINS: Union[list[str], str] = [
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "https://md.vaidyahealth.com",
+        "https://dev.md.vaidyahealth.com",
+    ]
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

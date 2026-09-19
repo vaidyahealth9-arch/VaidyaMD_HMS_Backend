@@ -11,6 +11,7 @@ from typing import Optional, Any
 
 from app.core.database import get_db
 from app.core.models import PermissionProfile, Hospital, User
+from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/permission-profiles", tags=["Permission Profiles"])
 
@@ -36,7 +37,11 @@ async def list_permission_profiles(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/", status_code=201)
-async def create_permission_profile(payload: ProfileCreate, db: AsyncSession = Depends(get_db)):
+async def create_permission_profile(
+    payload: ProfileCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Create a new dynamic permission profile."""
     result = await db.execute(select(Hospital).limit(1))
     hospital = result.scalar_one_or_none()
@@ -57,7 +62,12 @@ async def create_permission_profile(payload: ProfileCreate, db: AsyncSession = D
 
 
 @router.put("/{profile_id}")
-async def update_permission_profile(profile_id: UUID, payload: ProfileUpdate, db: AsyncSession = Depends(get_db)):
+async def update_permission_profile(
+    profile_id: UUID,
+    payload: ProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Update profile permissions or metadata."""
     profile = await db.get(PermissionProfile, profile_id)
     if not profile:

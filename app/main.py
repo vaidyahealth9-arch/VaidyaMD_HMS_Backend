@@ -189,6 +189,10 @@ async def websocket_notifications(websocket: WebSocket, user_id: str):
     Frontend connects as: ws://localhost:8000/ws/notifications/{userId}?token={jwt}
     """
     token = websocket.query_params.get("token")
+    if settings.ENVIRONMENT == "production" and not token:
+        await websocket.close(code=4401, reason="Authentication token required")
+        return
+
     if token:
         try:
             from app.core.security import decode_access_token

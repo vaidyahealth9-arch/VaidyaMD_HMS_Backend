@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from app.core.database import get_db
-from app.core.models import Branch, Hospital
+from app.core.models import Branch, Hospital, User
+from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/branches", tags=["Branches"])
 
@@ -44,7 +45,11 @@ async def list_branches(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/", status_code=201)
-async def create_branch(payload: BranchCreate, db: AsyncSession = Depends(get_db)):
+async def create_branch(
+    payload: BranchCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Register a new clinic branch."""
     result = await db.execute(select(Hospital).limit(1))
     hospital = result.scalar_one_or_none()
@@ -69,7 +74,12 @@ async def create_branch(payload: BranchCreate, db: AsyncSession = Depends(get_db
 
 
 @router.put("/{branch_id}")
-async def update_branch(branch_id: UUID, payload: BranchUpdate, db: AsyncSession = Depends(get_db)):
+async def update_branch(
+    branch_id: UUID,
+    payload: BranchUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Update branch details and IP whitelist."""
     branch = await db.get(Branch, branch_id)
     if not branch:

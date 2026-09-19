@@ -6,6 +6,7 @@ from uuid import UUID
 from typing import Optional
 
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
 from app.modules.ipd.service import IPDService
 from app.modules.ipd.schemas import (
     WardCreate, WardUpdate, BedCreate, BedUpdate, BedStatusUpdate,
@@ -13,7 +14,7 @@ from app.modules.ipd.schemas import (
     NursingTaskCreate, NursingTaskComplete
 )
 
-router = APIRouter(prefix="/ipd", tags=["IPD (Clean Architecture)"])
+router = APIRouter(prefix="/ipd", tags=["IPD (Clean Architecture)"], dependencies=[Depends(get_current_user)])
 
 def get_ipd_service(db: AsyncSession = Depends(get_db)) -> IPDService:
     return IPDService(db)

@@ -48,6 +48,7 @@ async def create_template(
 async def update_template(
     template_id: UUID,
     data: ClinicalTemplateUpdate,
+    current_user: User = Depends(get_current_user),
     service: ClinicalTemplateService = Depends(get_template_service)
 ):
     try:
@@ -58,6 +59,7 @@ async def update_template(
 @router.delete("/{template_id}")
 async def delete_template(
     template_id: UUID,
+    current_user: User = Depends(get_current_user),
     service: ClinicalTemplateService = Depends(get_template_service)
 ):
     try:
