@@ -389,3 +389,37 @@ class PatientService:
         partner = await self.db.get(Patient, patient.partner_id) if patient.partner_id else None
         return self.build_patient_response(patient, partner)
 
+    async def save_consent(self, patient_id: UUID, consent_data: Any, current_user: User) -> dict:
+        patient = await self.db.get(Patient, patient_id)
+        if not patient:
+            raise PatientNotFoundError(f"Patient with ID {patient_id} not found")
+        if patient.tenant_id != current_user.tenant_id:
+            raise PermissionError("Cross-tenant consent recording denied")
+
+        record = ClinicalRecord(
+            patient_id=patient_id,
+            plugin_id="fertility",
+            record_type="art_statutory_consent",
+            schema_version="1.0",
+            data={
+                "title": consent_data.title,
+                "signature": consent_data.signature,
+                "signed_at": datetime.utcnow().isoformat(),
+                "patient_name": patient.name,
+                "patient_vid": patient.vid,
+            },
+            created_by=current_user.id,
+        )
+        self.db.add(record)
+        await self.db.flush()
+        await self.db.refresh(record)
+        return {
+            "id": str(record.id),
+            "patient_id": str(patient_id),
+            "title": consent_data.title,
+            "created_at": record.created_at.isoformat(),
+            "status": "signed",
+            "message": "Statutory consent recorded successfully.",
+        }
+
+

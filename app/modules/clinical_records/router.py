@@ -11,6 +11,7 @@ from app.modules.clinical_records.schemas import ClinicalRecordCreate, ClinicalR
 
 router = APIRouter(prefix="/clinical-records", tags=["Clinical Records (Core EMR)"], dependencies=[Depends(get_current_user)])
 
+@router.post("", response_model=ClinicalRecordResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=ClinicalRecordResponse, status_code=status.HTTP_201_CREATED)
 async def create_clinical_record(
     data: ClinicalRecordCreate,
@@ -21,6 +22,9 @@ async def create_clinical_record(
     patient = await db.get(Patient, data.patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
+    if patient.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Cross-tenant clinical record creation denied")
+
 
     record = ClinicalRecord(
         patient_id=data.patient_id,

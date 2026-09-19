@@ -14,6 +14,7 @@ router = APIRouter(prefix="/templates", tags=["Clinical Templates (Clean Archite
 def get_template_service(db: AsyncSession = Depends(get_db)) -> ClinicalTemplateService:
     return ClinicalTemplateService(db)
 
+@router.get("", response_model=list[ClinicalTemplateResponse])
 @router.get("/", response_model=list[ClinicalTemplateResponse])
 async def get_templates(
     plugin_id: Optional[str] = None,
@@ -31,8 +32,10 @@ async def get_template_by_type(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
+@router.post("", response_model=ClinicalTemplateResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=ClinicalTemplateResponse, status_code=status.HTTP_201_CREATED)
 async def create_template(
+
     data: ClinicalTemplateCreate,
     current_user: User = Depends(get_current_user),
     service: ClinicalTemplateService = Depends(get_template_service)

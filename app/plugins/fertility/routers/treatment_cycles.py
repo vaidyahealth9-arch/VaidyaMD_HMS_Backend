@@ -143,12 +143,18 @@ def serialize_treatment_cycle(cycle: TreatmentCycle, patient: Optional[Patient] 
 
 
 # --- Endpoints ---
+@router.post("", status_code=201)
 @router.post("/", status_code=201)
-async def create_treatment_cycle(payload: CycleCreate, db: AsyncSession = Depends(get_db)):
+async def create_treatment_cycle(
+    payload: CycleCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Create a new treatment cycle for a patient."""
     patient = await db.get(Patient, payload.patient_id)
-    if not patient:
+    if not patient or patient.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=404, detail="Patient not found")
+
 
     cycle_num = await generate_cycle_id(db)
 
@@ -231,14 +237,21 @@ async def create_treatment_cycle(payload: CycleCreate, db: AsyncSession = Depend
     return serialize_treatment_cycle(cycle, patient, partner)
 
 
+@router.get("")
 @router.get("/")
 async def list_treatment_cycles(
     patient_id: Optional[UUID] = None,
     status: Optional[TreatmentCycleStatus] = None,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List treatment cycles optionally filtered by patient or status with enriched couple details."""
-    query = select(TreatmentCycle).order_by(desc(TreatmentCycle.created_at))
+    query = (
+        select(TreatmentCycle)
+        .where(TreatmentCycle.tenant_id == current_user.tenant_id)
+        .order_by(desc(TreatmentCycle.created_at))
+    )
+
     if patient_id:
         query = query.where(
             (TreatmentCycle.patient_id == patient_id) | (TreatmentCycle.partner_id == patient_id)

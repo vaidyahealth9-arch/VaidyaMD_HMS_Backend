@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     # File Storage
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE_MB: int = 50
+    GCS_BUCKET_NAME: Optional[str] = None
+
+    # Equipment & HL7 Integration
+    ENABLE_HL7_MLLP: bool = False
+
 
     # CORS
     CORS_ORIGINS: Union[list[str], str] = [

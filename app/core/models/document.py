@@ -4,7 +4,7 @@ VaidyaMD HMS — Document Model (File Registry)
 
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer
+from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -16,7 +16,8 @@ class Document(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False)
     file_name = Column(String(500), nullable=False)
-    file_path = Column(String(1000), nullable=False, comment="Local path or cloud URL")
+    file_path = Column(Text, nullable=False, comment="Local path, cloud URL, or fallback data URI")
+
     mime_type = Column(String(100))
     file_size = Column(Integer, comment="Size in bytes")
     category = Column(String(100), comment="E.g. 'scan', 'report', 'consent', 'prescription'")

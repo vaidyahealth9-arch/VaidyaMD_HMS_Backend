@@ -113,10 +113,15 @@ async def get_schema(record_type: str):
 
 
 
-async def get_couple_dues(patient_id: UUID, db: AsyncSession = Depends(get_db)):
-    """Calculate outstanding dues for a patient and their linked partner."""
+@router.get("/patient-dues/{patient_id}")
+async def get_couple_dues(
+    patient_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Calculate outstanding dues and wallet balance for a patient and their linked partner."""
     patient = await db.get(Patient, patient_id)
-    if not patient:
+    if not patient or patient.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=404, detail="Patient not found")
 
     async def calculate_dues(pid: UUID) -> float:
@@ -128,20 +133,40 @@ async def get_couple_dues(patient_id: UUID, db: AsyncSession = Depends(get_db)):
         invoices = res.scalars().all()
         return sum(float(inv.total_amount - inv.paid_amount) for inv in invoices)
 
+    async def get_wallet_bal(pid: UUID) -> float:
+        from app.core.models import PatientWallet
+        res = await db.execute(select(PatientWallet).where(PatientWallet.patient_id == pid))
+        w = res.scalar_one_or_none()
+        return float(w.balance) if w else 0.0
+
     patient_due = await calculate_dues(patient.id)
+    patient_wallet = await get_wallet_bal(patient.id)
     partner_due = 0.0
+    partner_wallet = 0.0
     partner_name = None
 
     if patient.partner_id:
         partner = await db.get(Patient, patient.partner_id)
-        if partner:
+        if partner and partner.tenant_id == current_user.tenant_id:
             partner_due = await calculate_dues(partner.id)
+            partner_wallet = await get_wallet_bal(partner.id)
             partner_name = partner.name
 
+    total_due = patient_due + partner_due
+    total_wallet = patient_wallet + partner_wallet
+    net_dues = max(0.0, total_due - total_wallet)
+
     return {
+        "patient_id": str(patient.id),
         "patient_name": patient.name,
         "patient_due": patient_due,
+        "patient_wallet": patient_wallet,
         "partner_name": partner_name,
         "partner_due": partner_due,
-        "total_due": patient_due + partner_due,
+        "partner_wallet": partner_wallet,
+        "total_due": total_due,
+        "total_wallet": total_wallet,
+        "net_dues": net_dues,
+        "status": "settled" if net_dues == 0.0 else "pending",
     }
+

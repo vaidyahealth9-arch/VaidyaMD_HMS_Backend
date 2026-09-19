@@ -18,12 +18,14 @@ class IPDService:
 
 
 
-    async def list_wards(self):
-
-        result = await self.db.execute(select(Ward).where(Ward.is_active == True))
+    async def list_wards(self, tenant_id: Optional[UUID] = None):
+        query = select(Ward).where(Ward.is_active == True)
+        if tenant_id:
+            query = query.where(Ward.tenant_id == tenant_id)
+        result = await self.db.execute(query)
         return result.scalars().all()
 
-    async def create_ward(self, payload: WardCreate):
+    async def create_ward(self, payload: WardCreate, tenant_id: Optional[UUID] = None):
         ward = Ward(
             name=payload.name,
             code=payload.code,
@@ -31,6 +33,7 @@ class IPDService:
             base_charge_per_day=payload.base_charge_per_day,
             total_beds=payload.total_beds,
             branch_id=payload.branch_id,
+            tenant_id=tenant_id,
         )
         self.db.add(ward)
         await self.db.flush()
@@ -73,9 +76,10 @@ class IPDService:
         await self.db.flush()
         return {"message": "Ward deactivated successfully"}
 
-    async def list_beds(self, ward_id: UUID = None, status: str = None):
-
-        query = select(Bed).order_by(Bed.bed_number)
+    async def list_beds(self, ward_id: UUID = None, status: str = None, tenant_id: Optional[UUID] = None):
+        query = select(Bed).join(Ward, Bed.ward_id == Ward.id).order_by(Bed.bed_number)
+        if tenant_id:
+            query = query.where(Ward.tenant_id == tenant_id)
         if ward_id:
             query = query.where(Bed.ward_id == ward_id)
         if status:
@@ -83,6 +87,7 @@ class IPDService:
 
         result = await self.db.execute(query)
         beds = result.scalars().all()
+
 
         enriched = []
         for b in beds:

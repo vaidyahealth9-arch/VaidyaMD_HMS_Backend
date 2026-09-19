@@ -73,8 +73,12 @@ async def lifespan(app: FastAPI):
 
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     
-    # Start background HL7 MLLP server on port 2575
-    hl7_server_task = asyncio.create_task(start_hl7_mllp_server(host="0.0.0.0", port=2575))
+    # Start background HL7 MLLP server on port 2575 if enabled (clinic LAN environments)
+    if settings.ENABLE_HL7_MLLP:
+        hl7_server_task = asyncio.create_task(start_hl7_mllp_server(host="0.0.0.0", port=2575))
+    else:
+        logger.info("ℹ️ HL7 MLLP raw TCP server disabled (Cloud Run mode). Use HTTP REST webhooks for analyzer feeds.")
+
 
     # Register default event listeners for cross-domain telemetry
     from app.core.events import event_bus, AppointmentStatusChangedEvent

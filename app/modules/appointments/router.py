@@ -23,15 +23,10 @@ async def create_appointment(
     service: AppointmentService = Depends(get_appointment_service),
 ):
     try:
-        tenant_id = current_user.tenant_id
-        if not tenant_id:
-            from app.core.models import Hospital
-            from sqlalchemy import select
-            result = await service.db.execute(select(Hospital).limit(1))
-            hospital = result.scalar_one_or_none()
-            tenant_id = hospital.id if hospital else None
-            
-        return await service.create_appointment(data, tenant_id)
+        if not current_user.tenant_id:
+            raise HTTPException(status_code=403, detail="User is not associated with an active hospital tenant")
+        return await service.create_appointment(data, current_user.tenant_id)
+
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except (InvalidAppointmentDateError, ActiveAppointmentExistsError) as e:

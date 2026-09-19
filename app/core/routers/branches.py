@@ -2,7 +2,7 @@
 VaidyaMD HMS — Branches Router (Multi-Clinic & IP Allowlist)
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
@@ -37,27 +37,37 @@ class BranchUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+@router.get("")
 @router.get("/")
-async def list_branches(db: AsyncSession = Depends(get_db)):
-    """List all clinic branches."""
-    result = await db.execute(select(Branch).order_by(Branch.is_main_branch.desc(), Branch.name))
+async def list_branches(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all clinic branches scoped to user's hospital tenant."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No active hospital tenant for user")
+
+    result = await db.execute(
+        select(Branch)
+        .where(Branch.hospital_id == current_user.tenant_id)
+        .order_by(Branch.is_main_branch.desc(), Branch.name)
+    )
     return result.scalars().all()
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_branch(
     payload: BranchCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Register a new clinic branch."""
-    result = await db.execute(select(Hospital).limit(1))
-    hospital = result.scalar_one_or_none()
-    if not hospital:
-        raise HTTPException(status_code=500, detail="No hospital configured")
+    """Register a new clinic branch under user's hospital tenant."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No active hospital tenant for user")
 
     branch = Branch(
-        hospital_id=hospital.id,
+        hospital_id=current_user.tenant_id,
         name=payload.name,
         code=payload.code.upper(),
         address=payload.address,
@@ -73,7 +83,21 @@ async def create_branch(
     return branch
 
 
+@router.get("/{branch_id}")
+async def get_branch(
+    branch_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve a single clinic branch by ID."""
+    branch = await db.get(Branch, branch_id)
+    if not branch or branch.hospital_id != current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    return branch
+
+
 @router.put("/{branch_id}")
+@router.patch("/{branch_id}")
 async def update_branch(
     branch_id: UUID,
     payload: BranchUpdate,
@@ -82,7 +106,7 @@ async def update_branch(
 ):
     """Update branch details and IP whitelist."""
     branch = await db.get(Branch, branch_id)
-    if not branch:
+    if not branch or branch.hospital_id != current_user.tenant_id:
         raise HTTPException(status_code=404, detail="Branch not found")
 
     if payload.name is not None:

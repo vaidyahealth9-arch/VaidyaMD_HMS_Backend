@@ -31,13 +31,10 @@ async def create_invoice(
     service: BillingService = Depends(get_billing_service),
 ):
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(status_code=403, detail="User is not associated with an active hospital tenant")
         tenant_id = current_user.tenant_id
-        if not tenant_id:
-            from app.core.models import Hospital
-            from sqlalchemy import select
-            result = await service.db.execute(select(Hospital).limit(1))
-            hospital = result.scalar_one_or_none()
-            tenant_id = hospital.id if hospital else None
+
         
         # Override created_by with current user if not provided
         if not data.created_by:

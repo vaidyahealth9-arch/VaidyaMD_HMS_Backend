@@ -2,7 +2,7 @@
 VaidyaMD HMS — Permission Profiles Router (Dynamic Configurable RBAC)
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
@@ -29,27 +29,37 @@ class ProfileUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+@router.get("")
 @router.get("/")
-async def list_permission_profiles(db: AsyncSession = Depends(get_db)):
-    """List all configured permission profiles for the hospital."""
-    result = await db.execute(select(PermissionProfile).order_by(PermissionProfile.name))
+async def list_permission_profiles(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all configured permission profiles for the user's hospital tenant."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No active hospital tenant for user")
+
+    result = await db.execute(
+        select(PermissionProfile)
+        .where(PermissionProfile.hospital_id == current_user.tenant_id)
+        .order_by(PermissionProfile.name)
+    )
     return result.scalars().all()
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_permission_profile(
     payload: ProfileCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new dynamic permission profile."""
-    result = await db.execute(select(Hospital).limit(1))
-    hospital = result.scalar_one_or_none()
-    if not hospital:
-        raise HTTPException(status_code=500, detail="No hospital configured")
+    """Create a new dynamic permission profile under user's hospital tenant."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No active hospital tenant for user")
 
     profile = PermissionProfile(
-        hospital_id=hospital.id,
+        hospital_id=current_user.tenant_id,
         name=payload.name,
         description=payload.description,
         menu_permissions=payload.menu_permissions,
@@ -61,7 +71,21 @@ async def create_permission_profile(
     return profile
 
 
+@router.get("/{profile_id}")
+async def get_permission_profile(
+    profile_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve a permission profile by ID."""
+    profile = await db.get(PermissionProfile, profile_id)
+    if not profile or profile.hospital_id != current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="Permission profile not found")
+    return profile
+
+
 @router.put("/{profile_id}")
+@router.patch("/{profile_id}")
 async def update_permission_profile(
     profile_id: UUID,
     payload: ProfileUpdate,
@@ -70,7 +94,7 @@ async def update_permission_profile(
 ):
     """Update profile permissions or metadata."""
     profile = await db.get(PermissionProfile, profile_id)
-    if not profile:
+    if not profile or profile.hospital_id != current_user.tenant_id:
         raise HTTPException(status_code=404, detail="Permission profile not found")
 
     if payload.name is not None:

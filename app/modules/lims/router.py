@@ -55,3 +55,29 @@ async def authorize_lab_report(
         return await service.authorize_lab_report(record_id, payload, current_user)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+class HL7IngestPayload(BaseModel):
+    raw_message: str
+
+
+@router.post("/hl7-message", status_code=201)
+@router.post("/hl7-message/", status_code=201)
+async def ingest_hl7_message_http(
+    payload: HL7IngestPayload,
+    current_user: User = Depends(get_current_user),
+):
+    """HTTP REST Webhook for HL7 v2.x ER7 messages from cloud bridges & analyzers."""
+    from app.core.hl7_server import parse_hl7_message, save_hl7_clinical_record
+    parsed = parse_hl7_message(payload.raw_message)
+    rec = await save_hl7_clinical_record(parsed)
+    if not rec:
+        raise HTTPException(status_code=400, detail="Failed to match patient or parse HL7 observation message")
+    return {
+        "status": "success",
+        "record_id": str(rec.id),
+        "test_name": parsed.get("test_name"),
+        "observations_count": len(parsed.get("observations", {})),
+        "message": "HL7 message ingested successfully via HTTP REST.",
+    }
+
