@@ -16,16 +16,17 @@ class PatientService:
         self.db = db
 
     async def generate_vid(self, hospital_code: str) -> str:
-        """Generate a collision-resistant unique VaidyaMD Patient ID"""
+        """Generate a collision-resistant unique VaidyaMD Patient ID with 3-letter hospital code and 7-digit serial number"""
+        code = (hospital_code or "VMD")[:3].upper().ljust(3, "X")
         result = await self.db.execute(select(func.count(Patient.id)))
         count = result.scalar() or 0
         base_num = count + 1
         for attempt in range(100):
-            candidate = f"VH-{hospital_code}-{(base_num + attempt):05d}"
+            candidate = f"VH-{code}-{(base_num + attempt):07d}"
             existing = await self.db.execute(select(Patient.id).where(Patient.vid == candidate))
             if not existing.scalar_one_or_none():
                 return candidate
-        return f"VH-{hospital_code}-{base_num:05d}-{random.randint(100, 999)}"
+        return f"VH-{code}-{base_num:07d}-{random.randint(100, 999)}"
 
     def build_patient_response(self, patient: Patient, partner: Optional[Patient] = None) -> PatientResponse:
         return PatientResponse(
