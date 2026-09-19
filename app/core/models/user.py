@@ -47,6 +47,7 @@ class User(Base):
     # Tenant & Branch FK
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id"), nullable=False)
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True)
+    allowed_branch_ids = Column(JSONB, default=list, comment="Explicit list of permitted branch UUIDs for facility staff")
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
