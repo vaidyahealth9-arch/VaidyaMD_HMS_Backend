@@ -92,23 +92,23 @@ def parse_hl7_message(raw_msg_str: str) -> dict[str, Any]:
     return parsed_result
 
 
-async def save_hl7_clinical_record(parsed_data: dict[str, Any]) -> Optional[ClinicalRecord]:
+async def save_hl7_clinical_record(parsed_data: dict[str, Any], tenant_id: Optional[UUID] = None) -> Optional[ClinicalRecord]:
     """
     Save parsed HL7 observations into database as a ClinicalRecord marked as 'Pending Authorization'.
+    Strictly matches patient by MRN/VID within tenant scope.
     """
     async with AsyncSessionLocal() as db:
-        # Match patient by MRN or fallback to first active patient
         patient = None
-        if parsed_data.get("patient_mrn"):
-            res = await db.execute(select(Patient).where(Patient.vid == parsed_data["patient_mrn"]))
+        mrn = parsed_data.get("patient_mrn")
+        if mrn:
+            query = select(Patient).where(Patient.vid == mrn)
+            if tenant_id:
+                query = query.where(Patient.tenant_id == tenant_id)
+            res = await db.execute(query)
             patient = res.scalar_one_or_none()
 
         if not patient:
-            res = await db.execute(select(Patient).limit(1))
-            patient = res.scalar_one_or_none()
-
-        if not patient:
-            print("❌ HL7 Ingest: No patient found in system.")
+            print(f"❌ HL7 Ingest: No matching patient found with MRN '{mrn}' (tenant: {tenant_id}).")
             return None
 
         # Determine record type

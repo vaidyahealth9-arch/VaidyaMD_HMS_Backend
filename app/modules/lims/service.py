@@ -53,17 +53,23 @@ class LIMSService:
             "message": f"Manual lab report for '{payload.test_name}' queued into LIMS worklist.",
         }
 
-    async def get_lims_worklist(self, status: str = None):
-        query = select(ClinicalRecord).where(
-            ClinicalRecord.record_type.in_(["casa_semen_analysis", "diagnostic_lab_report", "hematology_cbc"])
-        ).order_by(ClinicalRecord.created_at.desc())
+    async def get_lims_worklist(self, status: str = None, tenant_id: UUID = None):
+        query = (
+            select(ClinicalRecord, Patient)
+            .join(Patient, ClinicalRecord.patient_id == Patient.id)
+            .where(
+                ClinicalRecord.record_type.in_(["casa_semen_analysis", "diagnostic_lab_report", "hematology_cbc"])
+            )
+            .order_by(ClinicalRecord.created_at.desc())
+        )
+        if tenant_id:
+            query = query.where(Patient.tenant_id == tenant_id)
 
         res = await self.db.execute(query)
-        records = res.scalars().all()
+        rows = res.all()
 
         worklist = []
-        for r in records:
-            pat = await self.db.get(Patient, r.patient_id)
+        for r, pat in rows:
             current_status = r.data.get("status", "Pending Authorization")
             if status and current_status != status:
                 continue
@@ -88,18 +94,21 @@ class LIMSService:
             })
         return worklist
 
-    async def get_lims_record_detail(self, record_id: UUID):
+    async def get_lims_record_detail(self, record_id: UUID, tenant_id: UUID = None):
         record = await self.db.get(ClinicalRecord, record_id)
         if not record:
             raise ValueError("Lab record not found")
 
         pat = await self.db.get(Patient, record.patient_id)
+        if tenant_id and pat and pat.tenant_id != tenant_id:
+            raise PermissionError("Unauthorized access to lab record")
+
         return {
             "id": str(record.id),
             "patient": {
                 "id": str(pat.id) if pat else None,
                 "name": pat.name if pat else "Unknown",
-                "mrn": pat.mrn if pat else "—",
+                "mrn": pat.vid if pat else "—",
                 "gender": pat.gender if pat else "—",
                 "age": pat.age if pat else "—",
                 "blood_group": pat.blood_group if pat else "—",
@@ -108,12 +117,14 @@ class LIMSService:
             "created_at": record.created_at.isoformat(),
         }
 
-
-
     async def authorize_lab_report(self, record_id: UUID, payload: ReportAuthorizeRequest, current_user: User):
         record = await self.db.get(ClinicalRecord, record_id)
         if not record:
             raise ValueError("Lab record not found")
+
+        pat = await self.db.get(Patient, record.patient_id)
+        if current_user.tenant_id and pat and pat.tenant_id != current_user.tenant_id:
+            raise PermissionError("Cannot authorize record outside of current tenant")
 
         pathologist_id = payload.pathologist_id or current_user.id
         doctor = await self.db.get(User, pathologist_id)
