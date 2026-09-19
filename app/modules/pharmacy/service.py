@@ -17,10 +17,12 @@ class PharmacyService:
 
 
 
-    async def list_inventory_batches(self, category: str = None, search: str = None, tenant_id: UUID = None):
+    async def list_inventory_batches(self, category: str = None, search: str = None, tenant_id: UUID = None, branch_id: UUID = None):
         query = select(InventoryBatch).order_by(InventoryBatch.expiry_date.asc())
         if tenant_id:
             query = query.where(InventoryBatch.tenant_id == tenant_id)
+        if branch_id:
+            query = query.where(InventoryBatch.branch_id == branch_id)
         if category:
             query = query.where(InventoryBatch.category == category)
         res = await self.db.execute(query)
@@ -39,6 +41,14 @@ class PharmacyService:
         if not tenant_id:
             raise ValueError("Tenant context required for pharmacy dispense")
 
+        branch_id = getattr(payload, 'branch_id', None) or getattr(patient, 'branch_id', None) or (getattr(current_user, 'branch_id', None) if current_user else None)
+        branch_code = None
+        if branch_id:
+            from app.core.models.branch import Branch
+            b = await self.db.get(Branch, branch_id)
+            if b and b.code:
+                branch_code = b.code
+
         creator_id = (current_user.id if current_user else None) or payload.doctor_id or patient.treating_doctor_id
 
         dispensed_items_audit = []
@@ -46,7 +56,7 @@ class PharmacyService:
 
         for item in payload.items:
             qty_needed = item.quantity
-            res = await self.db.execute(
+            b_query = (
                 select(InventoryBatch)
                 .where(
                     InventoryBatch.tenant_id == tenant_id,
@@ -54,8 +64,12 @@ class PharmacyService:
                     InventoryBatch.quantity_available > 0,
                     InventoryBatch.is_active == True,
                 )
-                .order_by(InventoryBatch.expiry_date.asc())
             )
+            if branch_id:
+                b_query = b_query.where(InventoryBatch.branch_id == branch_id)
+            b_query = b_query.order_by(InventoryBatch.expiry_date.asc())
+
+            res = await self.db.execute(b_query)
             available_batches = res.scalars().all()
 
             if not available_batches:
@@ -84,14 +98,6 @@ class PharmacyService:
                     "total_price": item_cost,
                     "rack_location": batch.rack_location,
                 })
-
-        branch_id = getattr(payload, 'branch_id', None) or getattr(patient, 'branch_id', None) or (getattr(current_user, 'branch_id', None) if current_user else None)
-        branch_code = None
-        if branch_id:
-            from app.core.models.branch import Branch
-            b = await self.db.get(Branch, branch_id)
-            if b and b.code:
-                branch_code = b.code
 
         inv_prefix = f"INV-PHARMA-{branch_code}" if branch_code else "INV-PHARMA"
         inv_num = f"{inv_prefix}-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
@@ -151,6 +157,8 @@ class PharmacyService:
             indent_number=indent_num,
             tenant_id=tenant_id,
             branch_id=branch_id,
+            target_branch_id=payload.target_branch_id,
+            indent_type=payload.indent_type or "INTERNAL",
             requesting_department=payload.requesting_department,
             requested_by_id=payload.requested_by_id,
             urgency=payload.urgency,
@@ -170,6 +178,77 @@ class PharmacyService:
         indent.status = payload.status
         await self.db.flush()
         return {"message": f"Indent status updated to {payload.status}", "indent": indent}
+
+    async def fulfill_inter_branch_indent(self, indent_id: UUID, current_user=None):
+        indent = await self.db.get(PharmacyIndent, indent_id)
+        if not indent:
+            raise ValueError("Indent not found")
+        if indent.indent_type != "INTER_BRANCH" or not indent.target_branch_id:
+            raise ValueError("Only inter-branch indents with a designated target branch can be fulfilled via transfer.")
+        if indent.status in ["Fulfilled", "Cancelled"]:
+            raise ValueError(f"Cannot fulfill indent with current status '{indent.status}'.")
+
+        fulfilling_branch_id = indent.target_branch_id
+        receiving_branch_id = indent.branch_id
+        items_transferred = 0
+
+        for item in (indent.items or []):
+            item_code = item.get("item_code")
+            qty_needed = int(item.get("quantity", 1))
+
+            res = await self.db.execute(
+                select(InventoryBatch)
+                .where(
+                    InventoryBatch.tenant_id == indent.tenant_id,
+                    InventoryBatch.branch_id == fulfilling_branch_id,
+                    InventoryBatch.item_code == item_code,
+                    InventoryBatch.quantity_available > 0,
+                    InventoryBatch.is_active == True,
+                )
+                .order_by(InventoryBatch.expiry_date.asc())
+            )
+            available_batches = res.scalars().all()
+            total_avail = sum(b.quantity_available for b in available_batches)
+            if total_avail < qty_needed:
+                raise ValueError(
+                    f"Fulfilling branch has insufficient stock for item '{item_code}' "
+                    f"(requested: {qty_needed}, available: {total_avail})."
+                )
+
+            for b in available_batches:
+                if qty_needed <= 0:
+                    break
+                deduct_qty = min(b.quantity_available, qty_needed)
+                b.quantity_available -= deduct_qty
+                qty_needed -= deduct_qty
+
+                # Provision batch in receiving branch
+                dest_batch = InventoryBatch(
+                    tenant_id=indent.tenant_id,
+                    branch_id=receiving_branch_id,
+                    item_code=b.item_code,
+                    item_name=b.item_name,
+                    generic_name=b.generic_name,
+                    category=b.category,
+                    batch_number=b.batch_number,
+                    expiry_date=b.expiry_date,
+                    quantity_received=deduct_qty,
+                    quantity_available=deduct_qty,
+                    purchase_rate=b.purchase_rate,
+                    mrp=b.mrp,
+                    selling_price=b.selling_price,
+                    rack_location=f"Transferred from Indent #{indent.indent_number}",
+                )
+                self.db.add(dest_batch)
+                items_transferred += 1
+
+        indent.status = "Fulfilled"
+        await self.db.flush()
+        return {
+            "message": f"Successfully fulfilled transfer of {items_transferred} batch(es) for indent {indent.indent_number}.",
+            "indent_id": str(indent.id),
+            "status": "Fulfilled",
+        }
 
     async def list_purchase_orders(self, status: str = None, tenant_id: UUID = None):
         query = select(PurchaseOrder).order_by(PurchaseOrder.created_at.desc())

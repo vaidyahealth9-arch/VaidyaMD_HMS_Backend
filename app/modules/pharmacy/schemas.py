@@ -10,6 +10,8 @@ class IndentCreate(BaseModel):
     items: List[dict[str, Any]]
     notes: Optional[str] = None
     branch_id: Optional[UUID] = None
+    target_branch_id: Optional[UUID] = None
+    indent_type: Optional[str] = "INTERNAL"
 
 class IndentStatusUpdate(BaseModel):
     status: str

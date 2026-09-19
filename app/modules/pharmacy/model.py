@@ -14,6 +14,8 @@ class PharmacyIndent(Base):
     indent_number = Column(String(50), nullable=False, unique=True)
     requesting_department = Column(String(100), default="OPD")
     requested_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    target_branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True, comment="Branch fulfiller for inter-branch transfer")
+    indent_type = Column(String(50), default="INTERNAL", comment="INTERNAL, INTER_BRANCH, or VENDOR")
     urgency = Column(String(20), default="Normal")
     status = Column(String(50), default="Submitted")
     items = Column(JSONB, default=list)
@@ -23,6 +25,7 @@ class PharmacyIndent(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     requested_by = relationship("User", foreign_keys=[requested_by_id])
+    target_branch = relationship("Branch", foreign_keys=[target_branch_id])
 
 
 class PurchaseOrder(Base):

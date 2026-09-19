@@ -5,7 +5,7 @@ from typing import Optional
 
 from app.core.database import get_db
 from app.core.models import User
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_branch_context
 from app.modules.pharmacy.service import PharmacyService
 from app.modules.pharmacy.schemas import (
     IndentCreate, IndentStatusUpdate, PurchaseOrderCreate, GRNCreate, DispenseRequest
@@ -59,10 +59,11 @@ async def dispense_fefo(
 async def list_inventory_batches(
     category: Optional[str] = None,
     search: Optional[str] = None,
+    branch_id: Optional[UUID] = Depends(get_branch_context),
     current_user: User = Depends(get_current_user),
     service: PharmacyService = Depends(get_pharmacy_service)
 ):
-    return await service.list_inventory_batches(category, search, tenant_id=current_user.tenant_id)
+    return await service.list_inventory_batches(category, search, tenant_id=current_user.tenant_id, branch_id=branch_id)
 
 @router.get("/indents")
 @router.get("/indents/", include_in_schema=False)
@@ -77,6 +78,7 @@ async def list_indents(
 @router.post("/indents/", status_code=201, include_in_schema=False)
 async def create_indent(
     payload: IndentCreate,
+    branch_id: Optional[UUID] = Depends(get_branch_context),
     current_user: User = Depends(get_current_user),
     service: PharmacyService = Depends(get_pharmacy_service)
 ):
@@ -84,7 +86,21 @@ async def create_indent(
         raise HTTPException(status_code=403, detail="Tenant context required to create pharmacy indents")
     if not payload.requested_by_id:
         payload.requested_by_id = current_user.id
+    if not payload.branch_id and branch_id:
+        payload.branch_id = branch_id
     return await service.create_indent(payload, tenant_id=current_user.tenant_id)
+
+@router.post("/indents/{indent_id}/transfer-fulfill")
+@router.post("/indents/{indent_id}/transfer-fulfill/", include_in_schema=False)
+async def fulfill_inter_branch_indent(
+    indent_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: PharmacyService = Depends(get_pharmacy_service)
+):
+    try:
+        return await service.fulfill_inter_branch_indent(indent_id, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.patch("/indents/{indent_id}/status")
 @router.patch("/indents/{indent_id}/status/", include_in_schema=False)
