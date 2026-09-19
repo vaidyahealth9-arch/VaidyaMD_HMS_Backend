@@ -21,7 +21,8 @@ from app.core.models import (
     ClinicalRecord, Invoice, Appointment, Patient, User,
     InvoiceStatus, Bed, Notification, NotificationType, AppointmentStatus
 )
-from app.core.dependencies import get_current_user
+from app.core.models.branch import Branch
+from app.core.dependencies import get_current_user, get_branch_context
 
 router = APIRouter(prefix="/analytics", tags=["Revenue Leakage & Hospital Analytics"])
 
@@ -38,6 +39,7 @@ class ResolveLeakagePayload(BaseModel):
 @router.get("/revenue-breakdown/", include_in_schema=False)
 async def get_revenue_breakdown(
     timeframe: Optional[str] = Query(None, description="today, 7d, 30d, 90d, this_month, this_year, all"),
+    branch_id: Optional[UUID] = Depends(get_branch_context),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -70,6 +72,8 @@ async def get_revenue_breakdown(
         kpi_query = kpi_query.where(Invoice.created_at >= start_time)
     if current_user.tenant_id:
         kpi_query = kpi_query.where(Invoice.tenant_id == current_user.tenant_id)
+    if branch_id:
+        kpi_query = kpi_query.where(Invoice.branch_id == branch_id)
 
     kpi_res = await db.execute(kpi_query)
     kpi_row = kpi_res.one()
@@ -175,6 +179,8 @@ async def get_revenue_breakdown(
         dept_query = dept_query.where(Invoice.created_at >= start_time)
     if current_user.tenant_id:
         dept_query = dept_query.where(Invoice.tenant_id == current_user.tenant_id)
+    if branch_id:
+        dept_query = dept_query.where(Invoice.branch_id == branch_id)
 
     dept_res = await db.execute(dept_query)
     d_row = dept_res.one()
@@ -249,6 +255,8 @@ async def get_revenue_breakdown(
         )
         if current_user.tenant_id:
             m_query = m_query.where(Invoice.tenant_id == current_user.tenant_id)
+        if branch_id:
+            m_query = m_query.where(Invoice.branch_id == branch_id)
 
         m_res = await db.execute(m_query)
         m_row = m_res.one()
@@ -277,6 +285,8 @@ async def get_revenue_breakdown(
     )
     if current_user.tenant_id:
         ref_query = ref_query.where(Patient.tenant_id == current_user.tenant_id)
+    if branch_id:
+        ref_query = ref_query.where(Patient.branch_id == branch_id)
     ref_query = ref_query.group_by(Patient.referred_by_name, Patient.referred_by_type)
     ref_res = await db.execute(ref_query)
     ref_rows = ref_res.all()
@@ -304,6 +314,10 @@ async def get_revenue_breakdown(
         func.count(Bed.id).label("total_beds"),
         func.coalesce(func.count(case((Bed.status == "Occupied", 1))), 0).label("occupied_beds"),
     )
+    if current_user.tenant_id:
+        bed_query = bed_query.where(Bed.tenant_id == current_user.tenant_id)
+    if branch_id:
+        bed_query = bed_query.where(Bed.branch_id == branch_id)
     bed_res = await db.execute(bed_query)
     b_row = bed_res.one()
     total_beds = int(b_row.total_beds or 0)
@@ -314,12 +328,16 @@ async def get_revenue_breakdown(
     pat_count_query = select(func.count(Patient.id))
     if current_user.tenant_id:
         pat_count_query = pat_count_query.where(Patient.tenant_id == current_user.tenant_id)
+    if branch_id:
+        pat_count_query = pat_count_query.where(Patient.branch_id == branch_id)
     active_patients_count = (await db.execute(pat_count_query)).scalar_one_or_none() or 0
 
     # 7. Revenue Leakage Prevented (Calculated from resolved invoices)
     leak_prev_query = select(Invoice.items)
     if current_user.tenant_id:
         leak_prev_query = leak_prev_query.where(Invoice.tenant_id == current_user.tenant_id)
+    if branch_id:
+        leak_prev_query = leak_prev_query.where(Invoice.branch_id == branch_id)
     leak_prev_res = await db.execute(leak_prev_query)
     leakage_prevented = 0.0
     for items_list in leak_prev_res.scalars().all():
@@ -345,6 +363,7 @@ async def get_revenue_breakdown(
         "monthly_trend": monthly_trend,
         "referring_doctors": referring_doctors,
         "timeframe": timeframe or "all",
+        "branch_id": str(branch_id) if branch_id else "all",
     }
 
 
@@ -705,4 +724,386 @@ async def resolve_leakage(
         "invoice_number": inv_num,
         "amount": payload.amount,
         "wip": True,
+    }
+
+
+# ==============================================================================
+# 3-Tier Hierarchical Dashboards & Analytics
+# ==============================================================================
+
+@router.get("/network-overview")
+@router.get("/network-overview/", include_in_schema=False)
+async def get_network_overview(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Hospital Network Executive Dashboard (Tenant/Admin Tier).
+    Provides cross-branch comparative analytics, consolidated revenue,
+    active bed occupancy, and branch ranking across the entire hospital network.
+    """
+    user_role = (current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)).lower()
+    if user_role not in ["admin", "superadmin"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Network executive overview is restricted to Hospital Administrators.",
+        )
+
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant context required.")
+
+    # 1. Fetch all branches
+    branches_res = await db.execute(
+        select(Branch).where(Branch.hospital_id == tenant_id).order_by(Branch.name.asc())
+    )
+    branches = branches_res.scalars().all()
+
+    # 2. Consolidated Network Totals
+    net_kpi_res = await db.execute(
+        select(
+            func.coalesce(func.sum(Invoice.total_amount), 0.0).label("total_billed"),
+            func.coalesce(func.sum(Invoice.paid_amount), 0.0).label("total_collected"),
+            func.count(Invoice.id).label("invoices_count"),
+        ).where(Invoice.tenant_id == tenant_id)
+    )
+    net_kpi = net_kpi_res.one()
+
+    total_patients_cnt = (await db.execute(
+        select(func.count(Patient.id)).where(Patient.tenant_id == tenant_id)
+    )).scalar_one_or_none() or 0
+
+    total_appts_cnt = (await db.execute(
+        select(func.count(Appointment.id)).where(Appointment.tenant_id == tenant_id)
+    )).scalar_one_or_none() or 0
+
+    # 3. Branch-level comparative metrics
+    branch_cards = []
+    for b in branches:
+        b_inv_res = await db.execute(
+            select(
+                func.coalesce(func.sum(Invoice.total_amount), 0.0).label("billed"),
+                func.coalesce(func.sum(Invoice.paid_amount), 0.0).label("collected"),
+                func.count(Invoice.id).label("cnt"),
+            ).where(Invoice.tenant_id == tenant_id, Invoice.branch_id == b.id)
+        )
+        b_inv = b_inv_res.one()
+
+        b_pat_cnt = (await db.execute(
+            select(func.count(Patient.id)).where(Patient.tenant_id == tenant_id, Patient.branch_id == b.id)
+        )).scalar_one_or_none() or 0
+
+        b_appt_cnt = (await db.execute(
+            select(func.count(Appointment.id)).where(Appointment.tenant_id == tenant_id, Appointment.branch_id == b.id)
+        )).scalar_one_or_none() or 0
+
+        b_bed_res = await db.execute(
+            select(
+                func.count(Bed.id).label("total"),
+                func.coalesce(func.count(case((Bed.status == "Occupied", 1))), 0).label("occupied"),
+            ).where(Bed.tenant_id == tenant_id, Bed.branch_id == b.id)
+        )
+        b_bed = b_bed_res.one()
+        b_total_beds = int(b_bed.total or 0)
+        b_occ_beds = int(b_bed.occupied or 0)
+
+        billed_val = float(b_inv.billed or 0.0)
+        collected_val = float(b_inv.collected or 0.0)
+
+        branch_cards.append({
+            "branch_id": str(b.id),
+            "branch_name": b.name,
+            "branch_code": b.code,
+            "city": b.city,
+            "is_active": b.is_active,
+            "gstin": getattr(b, "gstin", None),
+            "enabled_plugins": getattr(b, "enabled_plugins", []) or [],
+            "total_revenue": round(billed_val, 2),
+            "total_collected": round(collected_val, 2),
+            "pending_dues": round(max(0.0, billed_val - collected_val), 2),
+            "invoices_count": int(b_inv.cnt or 0),
+            "registered_patients": b_pat_cnt,
+            "total_appointments": b_appt_cnt,
+            "total_beds": b_total_beds,
+            "occupied_beds": b_occ_beds,
+            "bed_occupancy_pct": round((b_occ_beds / b_total_beds * 100), 1) if b_total_beds > 0 else 0.0,
+        })
+
+    branch_cards.sort(key=lambda x: x["total_revenue"], reverse=True)
+
+    net_billed = float(net_kpi.total_billed or 0.0)
+    net_collected = float(net_kpi.total_collected or 0.0)
+
+    return {
+        "network_summary": {
+            "total_branches": len(branches),
+            "active_branches": sum(1 for b in branches if b.is_active),
+            "consolidated_revenue": round(net_billed, 2),
+            "consolidated_collected": round(net_collected, 2),
+            "consolidated_pending": round(max(0.0, net_billed - net_collected), 2),
+            "collection_efficiency_pct": round((net_collected / net_billed * 100), 1) if net_billed > 0 else 0.0,
+            "total_patients": total_patients_cnt,
+            "total_appointments": total_appts_cnt,
+        },
+        "branch_performance": branch_cards,
+    }
+
+
+@router.get("/branch-overview")
+@router.get("/branch-overview/", include_in_schema=False)
+async def get_branch_overview(
+    branch_id: Optional[UUID] = Depends(get_branch_context),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Branch / Facility Operations Dashboard (Branch Tier).
+    Provides real-time operational status for the active branch facility:
+    today's patient footfall, appointments, bed occupancy, and low pharmacy stock.
+    """
+    tenant_id = current_user.tenant_id
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    branch_info = {
+        "id": str(branch_id) if branch_id else "all",
+        "name": "All Network Branches" if not branch_id else None,
+        "code": "ALL" if not branch_id else None,
+        "gstin": None,
+        "receipt_header": None,
+    }
+    if branch_id:
+        b = await db.get(Branch, branch_id)
+        if b:
+            branch_info.update({
+                "name": b.name,
+                "code": b.code,
+                "city": b.city,
+                "address": b.address,
+                "gstin": getattr(b, "gstin", None),
+                "enabled_plugins": getattr(b, "enabled_plugins", []) or [],
+                "receipt_header": getattr(b, "receipt_header", {}) or {},
+            })
+
+    appt_query = select(
+        func.count(Appointment.id).label("total_today"),
+        func.coalesce(func.count(case((Appointment.status == AppointmentStatus.COMPLETED, 1))), 0).label("completed"),
+        func.coalesce(func.count(case((Appointment.status == AppointmentStatus.SCHEDULED, 1))), 0).label("scheduled"),
+        func.coalesce(func.count(case((Appointment.status == AppointmentStatus.CANCELLED, 1))), 0).label("cancelled"),
+        func.coalesce(func.count(case((Appointment.status == AppointmentStatus.NO_SHOW, 1))), 0).label("no_show"),
+    ).where(Appointment.tenant_id == tenant_id, Appointment.scheduled_at >= today_start)
+    if branch_id:
+        appt_query = appt_query.where(Appointment.branch_id == branch_id)
+    appt_row = (await db.execute(appt_query)).one()
+
+    rev_query = select(
+        func.coalesce(func.sum(Invoice.total_amount), 0.0).label("billed_today"),
+        func.coalesce(func.sum(Invoice.paid_amount), 0.0).label("collected_today"),
+    ).where(Invoice.tenant_id == tenant_id, Invoice.created_at >= today_start)
+    if branch_id:
+        rev_query = rev_query.where(Invoice.branch_id == branch_id)
+    rev_row = (await db.execute(rev_query)).one()
+
+    bed_query = select(
+        func.count(Bed.id).label("total_beds"),
+        func.coalesce(func.count(case((Bed.status == "Occupied", 1))), 0).label("occupied_beds"),
+    ).where(Bed.tenant_id == tenant_id)
+    if branch_id:
+        bed_query = bed_query.where(Bed.branch_id == branch_id)
+    bed_row = (await db.execute(bed_query)).one()
+    t_beds = int(bed_row.total_beds or 0)
+    o_beds = int(bed_row.occupied_beds or 0)
+
+    from app.modules.pharmacy.model import InventoryBatch, PharmacyIndent
+    pharma_low_query = select(func.count(InventoryBatch.id)).where(
+        InventoryBatch.tenant_id == tenant_id,
+        InventoryBatch.quantity_available <= 10,
+        InventoryBatch.is_active == True,
+    )
+    if branch_id:
+        pharma_low_query = pharma_low_query.where(InventoryBatch.branch_id == branch_id)
+    low_stock_count = (await db.execute(pharma_low_query)).scalar_one_or_none() or 0
+
+    indent_query = select(func.count(PharmacyIndent.id)).where(
+        PharmacyIndent.tenant_id == tenant_id,
+        PharmacyIndent.status.ilike("pending"),
+    )
+    if branch_id:
+        indent_query = indent_query.where(
+            or_(PharmacyIndent.branch_id == branch_id, PharmacyIndent.target_branch_id == branch_id)
+        )
+    pending_indents_count = (await db.execute(indent_query)).scalar_one_or_none() or 0
+
+    pat_footfall_q = select(func.count(Patient.id)).where(
+        Patient.tenant_id == tenant_id,
+        Patient.created_at >= today_start,
+    )
+    if branch_id:
+        pat_footfall_q = pat_footfall_q.where(Patient.branch_id == branch_id)
+    new_patients_today = (await db.execute(pat_footfall_q)).scalar_one_or_none() or 0
+
+    return {
+        "branch": branch_info,
+        "today_activity": {
+            "appointments_total": int(appt_row.total_today or 0),
+            "appointments_completed": int(appt_row.completed or 0),
+            "appointments_scheduled": int(appt_row.scheduled or 0),
+            "appointments_cancelled": int(appt_row.cancelled or 0),
+            "appointments_no_show": int(appt_row.no_show or 0),
+            "new_patients_registered": new_patients_today,
+            "revenue_billed_today": round(float(rev_row.billed_today or 0.0), 2),
+            "revenue_collected_today": round(float(rev_row.collected_today or 0.0), 2),
+        },
+        "ipd_capacity": {
+            "total_beds": t_beds,
+            "occupied_beds": o_beds,
+            "vacant_beds": max(0, t_beds - o_beds),
+            "occupancy_rate_pct": round((o_beds / t_beds * 100), 1) if t_beds > 0 else 0.0,
+        },
+        "pharmacy_alert": {
+            "low_stock_batch_count": low_stock_count,
+            "pending_indents_count": pending_indents_count,
+        },
+    }
+
+
+@router.get("/doctor-overview")
+@router.get("/doctor-overview/", include_in_schema=False)
+async def get_doctor_overview(
+    doctor_id: Optional[UUID] = Query(None, description="Doctor UUID (admin can inspect any doctor, doctor defaults to self)"),
+    branch_id: Optional[UUID] = Depends(get_branch_context),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Doctor Productivity & Clinical Workstation Analytics (User Tier).
+    Delivers personalized clinical metrics: today's consultation queue,
+    lifetime patients managed, notes authored, and fertility cycle outcomes.
+    """
+    user_role = (current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)).lower()
+    target_doctor_id = current_user.id
+
+    if doctor_id and user_role in ["admin", "superadmin"]:
+        target_doctor_id = doctor_id
+    elif user_role not in ["doctor", "admin", "superadmin"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Doctor workstation analytics is restricted to Doctors and Administrators.",
+        )
+
+    target_doctor = await db.get(User, target_doctor_id)
+    if not target_doctor:
+        raise HTTPException(status_code=404, detail="Doctor user profile not found.")
+
+    tenant_id = current_user.tenant_id
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # 1. Today's appointments for this doctor
+    today_appts_q = (
+        select(Appointment)
+        .options(selectinload(Appointment.patient))
+        .where(
+            Appointment.tenant_id == tenant_id,
+            Appointment.doctor_id == target_doctor_id,
+            Appointment.scheduled_at >= today_start,
+        )
+        .order_by(Appointment.scheduled_at.asc())
+    )
+    if branch_id:
+        today_appts_q = today_appts_q.where(Appointment.branch_id == branch_id)
+    today_appts_res = await db.execute(today_appts_q)
+    today_appts = today_appts_res.scalars().all()
+
+    today_queue = []
+    for a in today_appts:
+        p = a.patient
+        today_queue.append({
+            "appointment_id": str(a.id),
+            "patient_id": str(a.patient_id),
+            "patient_name": p.name if p else "Patient",
+            "patient_vid": p.vid if p else None,
+            "scheduled_time": a.scheduled_at.isoformat() if a.scheduled_at else None,
+            "status": a.status.value if hasattr(a.status, "value") else str(a.status),
+            "visit_type": a.visit_type or "consultation",
+            "department": a.department,
+        })
+
+    # 2. Doctor Productivity KPIs
+    completed_consults_q = select(func.count(Appointment.id)).where(
+        Appointment.tenant_id == tenant_id,
+        Appointment.doctor_id == target_doctor_id,
+        Appointment.status == AppointmentStatus.COMPLETED,
+    )
+    if branch_id:
+        completed_consults_q = completed_consults_q.where(Appointment.branch_id == branch_id)
+    completed_consults = (await db.execute(completed_consults_q)).scalar_one_or_none() or 0
+
+    distinct_patients_q = select(func.count(func.distinct(ClinicalRecord.patient_id))).where(
+        ClinicalRecord.tenant_id == tenant_id,
+        ClinicalRecord.doctor_id == target_doctor_id,
+    )
+    if branch_id:
+        distinct_patients_q = distinct_patients_q.where(ClinicalRecord.branch_id == branch_id)
+    unique_patients = (await db.execute(distinct_patients_q)).scalar_one_or_none() or 0
+
+    records_authored_q = select(func.count(ClinicalRecord.id)).where(
+        ClinicalRecord.tenant_id == tenant_id,
+        ClinicalRecord.doctor_id == target_doctor_id,
+    )
+    if branch_id:
+        records_authored_q = records_authored_q.where(ClinicalRecord.branch_id == branch_id)
+    records_authored = (await db.execute(records_authored_q)).scalar_one_or_none() or 0
+
+    prescriptions_q = select(func.count(ClinicalRecord.id)).where(
+        ClinicalRecord.tenant_id == tenant_id,
+        ClinicalRecord.doctor_id == target_doctor_id,
+        or_(
+            ClinicalRecord.record_type.ilike("%rx%"),
+            ClinicalRecord.record_type.ilike("%prescription%"),
+        )
+    )
+    if branch_id:
+        prescriptions_q = prescriptions_q.where(ClinicalRecord.branch_id == branch_id)
+    prescriptions_count = (await db.execute(prescriptions_q)).scalar_one_or_none() or 0
+
+    # 3. Fertility Outcomes
+    fertility_stats = None
+    try:
+        from app.plugins.fertility.models import TreatmentCycle, TreatmentCycleStatus
+        tc_query = select(
+            func.count(TreatmentCycle.id).label("total_cycles"),
+            func.coalesce(func.count(case((TreatmentCycle.status == TreatmentCycleStatus.RUNNING, 1))), 0).label("running"),
+            func.coalesce(func.count(case((TreatmentCycle.status == TreatmentCycleStatus.COMPLETED, 1))), 0).label("completed"),
+        ).where(
+            TreatmentCycle.tenant_id == tenant_id,
+            TreatmentCycle.treating_doctor_id == target_doctor_id,
+        )
+        if branch_id:
+            tc_query = tc_query.where(TreatmentCycle.branch_id == branch_id)
+        tc_res = await db.execute(tc_query)
+        tc_row = tc_res.one()
+        fertility_stats = {
+            "total_treatment_cycles": int(tc_row.total_cycles or 0),
+            "running_cycles": int(tc_row.running or 0),
+            "completed_cycles": int(tc_row.completed or 0),
+        }
+    except Exception:
+        fertility_stats = None
+
+    return {
+        "doctor": {
+            "id": str(target_doctor.id),
+            "name": target_doctor.name,
+            "email": target_doctor.email,
+            "role": target_doctor.role.value if hasattr(target_doctor.role, "value") else str(target_doctor.role),
+            "department": getattr(target_doctor, "department", "Clinical"),
+            "primary_branch_id": str(target_doctor.branch_id) if target_doctor.branch_id else None,
+        },
+        "today_queue": today_queue,
+        "productivity": {
+            "completed_consultations": completed_consults,
+            "unique_patients_treated": unique_patients,
+            "clinical_notes_authored": records_authored,
+            "prescriptions_issued": prescriptions_count,
+        },
+        "fertility_workstation": fertility_stats,
     }
