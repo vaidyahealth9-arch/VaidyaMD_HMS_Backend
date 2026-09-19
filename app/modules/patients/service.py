@@ -139,6 +139,13 @@ class PatientService:
             tenant_id=tenant_id,
         )
 
+        if not patient.branch_id:
+            from app.core.models.branch import Branch
+            b_res = await self.db.execute(
+                select(Branch.id).where(Branch.hospital_id == tenant_id).order_by(desc(Branch.is_main_branch), Branch.created_at)
+            )
+            patient.branch_id = b_res.scalars().first()
+
         self.db.add(patient)
         await self.db.flush()
 
@@ -166,7 +173,7 @@ class PatientService:
     async def list_patients(self, tenant_id: UUID, branch_id: Optional[UUID] = None, page: int = 1, per_page: int = 50, search: Optional[str] = None) -> PatientListResponse:
         query = select(Patient).where(Patient.tenant_id == tenant_id)
         if branch_id:
-            query = query.where(Patient.branch_id == branch_id)
+            query = query.where(or_(Patient.branch_id == branch_id, Patient.branch_id.is_(None)))
         
         if search and search.strip():
             s = f"%{search.strip()}%"
