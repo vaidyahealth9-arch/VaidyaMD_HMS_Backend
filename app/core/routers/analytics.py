@@ -2,6 +2,7 @@
 VaidyaMD HMS — Revenue Leakage Engine & Clinical Analytics Router
 Real-time database aggregation for hospital KPIs, department breakdowns,
 monthly trends, referral ROI, leakage detection, and no-show queues.
+Pushed-down SQL aggregations for production performance and strict tenant isolation.
 """
 
 import uuid
@@ -9,7 +10,7 @@ from datetime import datetime, date, timedelta
 from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, and_, or_
+from sqlalchemy import select, func, desc, and_, or_, case
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 from typing import Optional, Any, List
@@ -17,7 +18,7 @@ from uuid import UUID
 
 from app.core.database import get_db
 from app.core.models import (
-    ClinicalRecord, Invoice, Appointment, Patient, User, Hospital,
+    ClinicalRecord, Invoice, Appointment, Patient, User,
     InvoiceStatus, Bed, Notification, NotificationType, AppointmentStatus
 )
 from app.core.dependencies import get_current_user
@@ -34,6 +35,7 @@ class ResolveLeakagePayload(BaseModel):
 
 
 @router.get("/revenue-breakdown")
+@router.get("/revenue-breakdown/", include_in_schema=False)
 async def get_revenue_breakdown(
     timeframe: Optional[str] = Query(None, description="today, 7d, 30d, 90d, this_month, this_year, all"),
     current_user: User = Depends(get_current_user),
@@ -41,7 +43,7 @@ async def get_revenue_breakdown(
 ):
     """
     Hospital revenue analytics partitioned dynamically by department, doctor, and monthly growth trends.
-    Uses 100% real database records.
+    Uses SQL aggregation for fast, production-grade KPI computation.
     """
     now = datetime.utcnow()
     start_time = None
@@ -58,100 +60,145 @@ async def get_revenue_breakdown(
     elif timeframe == "this_year":
         start_time = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # Base query for all invoices (for trend & leakage prevented calculation)
-    all_inv_query = select(Invoice).order_by(Invoice.created_at.desc())
-    if current_user.tenant_id:
-        all_inv_query = all_inv_query.where(Invoice.tenant_id == current_user.tenant_id)
-
-    res_all = await db.execute(all_inv_query)
-    all_invoices = res_all.scalars().all()
-
-    # Filtered invoices for current timeframe metrics
+    # 1. Total Billed, Collected, and Invoices Count via SQL func.sum
+    kpi_query = select(
+        func.coalesce(func.sum(Invoice.total_amount), 0.0).label("total_billed"),
+        func.coalesce(func.sum(Invoice.paid_amount), 0.0).label("total_collected"),
+        func.count(Invoice.id).label("invoices_count"),
+    )
     if start_time:
-        invoices = [inv for inv in all_invoices if inv.created_at and inv.created_at >= start_time]
-    else:
-        invoices = all_invoices
+        kpi_query = kpi_query.where(Invoice.created_at >= start_time)
+    if current_user.tenant_id:
+        kpi_query = kpi_query.where(Invoice.tenant_id == current_user.tenant_id)
 
-    total_billed = float(sum(float(inv.total_amount or 0) for inv in invoices))
-    total_collected = float(sum(float(inv.paid_amount or 0) for inv in invoices))
+    kpi_res = await db.execute(kpi_query)
+    kpi_row = kpi_res.one()
+
+    total_billed = float(kpi_row.total_billed or 0.0)
+    total_collected = float(kpi_row.total_collected or 0.0)
+    invoices_count = int(kpi_row.invoices_count or 0)
     pending_collections = max(0.0, total_billed - total_collected)
     collection_efficiency = round((total_collected / total_billed * 100), 1) if total_billed > 0 else 0.0
 
-    # 1. Dynamic Department Breakdown
-    dept_totals = defaultdict(float)
-    dept_counts = defaultdict(int)
-    for inv in invoices:
-        source = (inv.appointment_source or "OP").upper()
-        amount = float(inv.total_amount or 0.0)
-        
-        assigned = False
-        if any(k in source for k in ["IVF", "ART", "EMBRYO", "PACKAGE"]):
-            dept_totals["IVF & ART Procedures"] += amount
-            dept_counts["IVF & ART Procedures"] += 1
-            assigned = True
-        elif any(k in source for k in ["PHARM", "RX", "MED"]):
-            dept_totals["Pharmacy & Therapeutics"] += amount
-            dept_counts["Pharmacy & Therapeutics"] += 1
-            assigned = True
-        elif any(k in source for k in ["IP", "WARD", "SURGERY", "ADMISSION"]):
-            dept_totals["IPD Ward & OT Surgeries"] += amount
-            dept_counts["IPD Ward & OT Surgeries"] += 1
-            assigned = True
-        elif any(k in source for k in ["LIMS", "LAB", "ANDROLOGY", "CASA", "DIAGNOSTIC"]):
-            dept_totals["LIMS & Andrology Diagnostics"] += amount
-            dept_counts["LIMS & Andrology Diagnostics"] += 1
-            assigned = True
+    # 2. Dynamic Department Breakdown via SQL CASE aggregation
+    dept_query = select(
+        func.coalesce(func.sum(case((or_(
+            Invoice.appointment_source.ilike("%IVF%"),
+            Invoice.appointment_source.ilike("%ART%"),
+            Invoice.appointment_source.ilike("%PACKAGE%"),
+            Invoice.appointment_source.ilike("%EMBRYO%")
+        ), Invoice.total_amount), else_=0.0)), 0.0).label("ivf_rev"),
+        func.coalesce(func.count(case((or_(
+            Invoice.appointment_source.ilike("%IVF%"),
+            Invoice.appointment_source.ilike("%ART%"),
+            Invoice.appointment_source.ilike("%PACKAGE%"),
+            Invoice.appointment_source.ilike("%EMBRYO%")
+        ), 1))), 0).label("ivf_cnt"),
 
-        if not assigned:
-            # Inspect line items
-            for it in (inv.items or []):
-                desc_lower = str(it.get("description", "")).lower()
-                if any(k in desc_lower for k in ["ivf", "icsi", "embryo", "opu", "stim"]):
-                    dept_totals["IVF & ART Procedures"] += amount
-                    dept_counts["IVF & ART Procedures"] += 1
-                    assigned = True
-                    break
-                elif any(k in desc_lower for k in ["tab", "cap", "inj", "syrup", "pharm"]):
-                    dept_totals["Pharmacy & Therapeutics"] += amount
-                    dept_counts["Pharmacy & Therapeutics"] += 1
-                    assigned = True
-                    break
-                elif any(k in desc_lower for k in ["bed", "ward", "admission"]):
-                    dept_totals["IPD Ward & OT Surgeries"] += amount
-                    dept_counts["IPD Ward & OT Surgeries"] += 1
-                    assigned = True
-                    break
-                elif any(k in desc_lower for k in ["semen", "cbc", "blood", "test", "scan", "dfi"]):
-                    dept_totals["LIMS & Andrology Diagnostics"] += amount
-                    dept_counts["LIMS & Andrology Diagnostics"] += 1
-                    assigned = True
-                    break
+        func.coalesce(func.sum(case((or_(
+            Invoice.appointment_source.ilike("%PHARM%"),
+            Invoice.appointment_source.ilike("%RX%"),
+            Invoice.appointment_source.ilike("%MED%")
+        ), Invoice.total_amount), else_=0.0)), 0.0).label("pharm_rev"),
+        func.coalesce(func.count(case((or_(
+            Invoice.appointment_source.ilike("%PHARM%"),
+            Invoice.appointment_source.ilike("%RX%"),
+            Invoice.appointment_source.ilike("%MED%")
+        ), 1))), 0).label("pharm_cnt"),
 
-        if not assigned:
-            dept_totals["OPD Consultations"] += amount
-            dept_counts["OPD Consultations"] += 1
+        func.coalesce(func.sum(case((or_(
+            Invoice.appointment_source.ilike("%IP%"),
+            Invoice.appointment_source.ilike("%WARD%"),
+            Invoice.appointment_source.ilike("%SURGERY%"),
+            Invoice.appointment_source.ilike("%ADMISSION%")
+        ), Invoice.total_amount), else_=0.0)), 0.0).label("ipd_rev"),
+        func.coalesce(func.count(case((or_(
+            Invoice.appointment_source.ilike("%IP%"),
+            Invoice.appointment_source.ilike("%WARD%"),
+            Invoice.appointment_source.ilike("%SURGERY%"),
+            Invoice.appointment_source.ilike("%ADMISSION%")
+        ), 1))), 0).label("ipd_cnt"),
 
-    standard_departments = [
-        ("IVF & ART Procedures", "#4f46e5"),
-        ("Pharmacy & Therapeutics", "#06b6d4"),
-        ("IPD Ward & OT Surgeries", "#10b981"),
-        ("OPD Consultations", "#8b5cf6"),
-        ("LIMS & Andrology Diagnostics", "#f59e0b"),
+        func.coalesce(func.sum(case((or_(
+            Invoice.appointment_source.ilike("%LIMS%"),
+            Invoice.appointment_source.ilike("%LAB%"),
+            Invoice.appointment_source.ilike("%ANDROLOGY%"),
+            Invoice.appointment_source.ilike("%CASA%"),
+            Invoice.appointment_source.ilike("%DIAGNOSTIC%")
+        ), Invoice.total_amount), else_=0.0)), 0.0).label("lims_rev"),
+        func.coalesce(func.count(case((or_(
+            Invoice.appointment_source.ilike("%LIMS%"),
+            Invoice.appointment_source.ilike("%LAB%"),
+            Invoice.appointment_source.ilike("%ANDROLOGY%"),
+            Invoice.appointment_source.ilike("%CASA%"),
+            Invoice.appointment_source.ilike("%DIAGNOSTIC%")
+        ), 1))), 0).label("lims_cnt"),
+
+        func.coalesce(func.sum(case((and_(
+            ~Invoice.appointment_source.ilike("%IVF%"),
+            ~Invoice.appointment_source.ilike("%ART%"),
+            ~Invoice.appointment_source.ilike("%PACKAGE%"),
+            ~Invoice.appointment_source.ilike("%EMBRYO%"),
+            ~Invoice.appointment_source.ilike("%PHARM%"),
+            ~Invoice.appointment_source.ilike("%RX%"),
+            ~Invoice.appointment_source.ilike("%MED%"),
+            ~Invoice.appointment_source.ilike("%IP%"),
+            ~Invoice.appointment_source.ilike("%WARD%"),
+            ~Invoice.appointment_source.ilike("%SURGERY%"),
+            ~Invoice.appointment_source.ilike("%ADMISSION%"),
+            ~Invoice.appointment_source.ilike("%LIMS%"),
+            ~Invoice.appointment_source.ilike("%LAB%"),
+            ~Invoice.appointment_source.ilike("%ANDROLOGY%"),
+            ~Invoice.appointment_source.ilike("%CASA%"),
+            ~Invoice.appointment_source.ilike("%DIAGNOSTIC%"),
+        ), Invoice.total_amount), else_=0.0)), 0.0).label("opd_rev"),
+        func.coalesce(func.count(case((and_(
+            ~Invoice.appointment_source.ilike("%IVF%"),
+            ~Invoice.appointment_source.ilike("%ART%"),
+            ~Invoice.appointment_source.ilike("%PACKAGE%"),
+            ~Invoice.appointment_source.ilike("%EMBRYO%"),
+            ~Invoice.appointment_source.ilike("%PHARM%"),
+            ~Invoice.appointment_source.ilike("%RX%"),
+            ~Invoice.appointment_source.ilike("%MED%"),
+            ~Invoice.appointment_source.ilike("%IP%"),
+            ~Invoice.appointment_source.ilike("%WARD%"),
+            ~Invoice.appointment_source.ilike("%SURGERY%"),
+            ~Invoice.appointment_source.ilike("%ADMISSION%"),
+            ~Invoice.appointment_source.ilike("%LIMS%"),
+            ~Invoice.appointment_source.ilike("%LAB%"),
+            ~Invoice.appointment_source.ilike("%ANDROLOGY%"),
+            ~Invoice.appointment_source.ilike("%CASA%"),
+            ~Invoice.appointment_source.ilike("%DIAGNOSTIC%"),
+        ), 1))), 0).label("opd_cnt"),
+    )
+    if start_time:
+        dept_query = dept_query.where(Invoice.created_at >= start_time)
+    if current_user.tenant_id:
+        dept_query = dept_query.where(Invoice.tenant_id == current_user.tenant_id)
+
+    dept_res = await db.execute(dept_query)
+    d_row = dept_res.one()
+
+    dept_mapping = [
+        ("IVF & ART Procedures", "#4f46e5", float(d_row.ivf_rev), int(d_row.ivf_cnt)),
+        ("Pharmacy & Therapeutics", "#06b6d4", float(d_row.pharm_rev), int(d_row.pharm_cnt)),
+        ("IPD Ward & OT Surgeries", "#10b981", float(d_row.ipd_rev), int(d_row.ipd_cnt)),
+        ("OPD Consultations", "#8b5cf6", float(d_row.opd_rev), int(d_row.opd_cnt)),
+        ("LIMS & Andrology Diagnostics", "#f59e0b", float(d_row.lims_rev), int(d_row.lims_cnt)),
     ]
 
     dept_revenue = []
-    for d_name, color in standard_departments:
-        actual_amt = round(dept_totals.get(d_name, 0.0), 2)
-        pct = round((actual_amt / total_billed * 100), 1) if total_billed > 0 else 0.0
+    for d_name, color, rev, cnt in dept_mapping:
+        pct = round((rev / total_billed * 100), 1) if total_billed > 0 else 0.0
         dept_revenue.append({
             "department": d_name,
-            "revenue": actual_amt,
+            "revenue": round(rev, 2),
             "color": color,
             "pct": pct,
-            "count": dept_counts.get(d_name, 0),
+            "count": cnt,
         })
 
-    # 2. Dynamic Monthly Trend (Past 6 Months Chronological)
+    # 3. Dynamic Monthly Trend (Past 6 Months Chronological via SQL)
     monthly_trend = []
     for i in range(5, -1, -1):
         target_year = now.year
@@ -159,90 +206,124 @@ async def get_revenue_breakdown(
         while target_month <= 0:
             target_month += 12
             target_year -= 1
-        
+
         m_date = date(target_year, target_month, 1)
         m_label = m_date.strftime("%b")
-        
-        month_invoices = [
-            inv for inv in all_invoices
-            if inv.created_at and inv.created_at.year == target_year and inv.created_at.month == target_month
-        ]
-        
-        m_rev = float(sum(float(inv.total_amount or 0) for inv in month_invoices))
-        m_collected = float(sum(float(inv.paid_amount or 0) for inv in month_invoices))
-        
-        m_opd = 0.0
-        m_ivf = 0.0
-        m_pharmacy = 0.0
-        m_ipd = 0.0
-        for inv in month_invoices:
-            src = (inv.appointment_source or "OP").upper()
-            amt = float(inv.total_amount or 0.0)
-            if any(k in src for k in ["IVF", "ART", "PACKAGE"]):
-                m_ivf += amt
-            elif any(k in src for k in ["PHARM", "RX"]):
-                m_pharmacy += amt
-            elif any(k in src for k in ["IP", "WARD"]):
-                m_ipd += amt
-            else:
-                m_opd += amt
+
+        if target_month == 12:
+            next_m_date = date(target_year + 1, 1, 1)
+        else:
+            next_m_date = date(target_year, target_month + 1, 1)
+
+        m_start = datetime(target_year, target_month, 1)
+        m_end = datetime(next_m_date.year, next_m_date.month, 1)
+
+        m_query = select(
+            func.coalesce(func.sum(Invoice.total_amount), 0.0).label("m_rev"),
+            func.coalesce(func.sum(Invoice.paid_amount), 0.0).label("m_col"),
+            func.coalesce(func.sum(case((or_(
+                Invoice.appointment_source.ilike("%IVF%"),
+                Invoice.appointment_source.ilike("%ART%"),
+                Invoice.appointment_source.ilike("%PACKAGE%")
+            ), Invoice.total_amount), else_=0.0)), 0.0).label("m_ivf"),
+            func.coalesce(func.sum(case((or_(
+                Invoice.appointment_source.ilike("%PHARM%"),
+                Invoice.appointment_source.ilike("%RX%")
+            ), Invoice.total_amount), else_=0.0)), 0.0).label("m_pharmacy"),
+            func.coalesce(func.sum(case((or_(
+                Invoice.appointment_source.ilike("%IP%"),
+                Invoice.appointment_source.ilike("%WARD%")
+            ), Invoice.total_amount), else_=0.0)), 0.0).label("m_ipd"),
+            func.coalesce(func.sum(case((and_(
+                ~Invoice.appointment_source.ilike("%IVF%"),
+                ~Invoice.appointment_source.ilike("%ART%"),
+                ~Invoice.appointment_source.ilike("%PACKAGE%"),
+                ~Invoice.appointment_source.ilike("%PHARM%"),
+                ~Invoice.appointment_source.ilike("%RX%"),
+                ~Invoice.appointment_source.ilike("%IP%"),
+                ~Invoice.appointment_source.ilike("%WARD%"),
+            ), Invoice.total_amount), else_=0.0)), 0.0).label("m_opd"),
+        ).where(
+            Invoice.created_at >= m_start,
+            Invoice.created_at < m_end,
+        )
+        if current_user.tenant_id:
+            m_query = m_query.where(Invoice.tenant_id == current_user.tenant_id)
+
+        m_res = await db.execute(m_query)
+        m_row = m_res.one()
 
         monthly_trend.append({
             "month": m_label,
             "year": target_year,
-            "revenue": round(m_rev, 2),
-            "collected": round(m_collected, 2),
-            "opd": round(m_opd, 2),
-            "ivf": round(m_ivf, 2),
-            "pharmacy": round(m_pharmacy, 2),
-            "ipd": round(m_ipd, 2),
+            "revenue": round(float(m_row.m_rev or 0.0), 2),
+            "collected": round(float(m_row.m_col or 0.0), 2),
+            "opd": round(float(m_row.m_opd or 0.0), 2),
+            "ivf": round(float(m_row.m_ivf or 0.0), 2),
+            "pharmacy": round(float(m_row.m_pharmacy or 0.0), 2),
+            "ipd": round(float(m_row.m_ipd or 0.0), 2),
         })
 
-    # 3. Dynamic Referring Doctors & Marketing Attribution from real patients
-    pat_query = select(Patient)
-    if current_user.tenant_id:
-        pat_query = pat_query.where(Patient.tenant_id == current_user.tenant_id)
-    pats_res = await db.execute(pat_query)
-    all_patients = pats_res.scalars().all()
-
-    doctor_referrals = defaultdict(lambda: {"patients_referred": 0, "revenue_generated": 0.0, "total_collected": 0.0, "type": "walk_in"})
-    for p in all_patients:
-        doc_name = p.referred_by_name or (
-            f"Dr. {p.referred_by_type.title()}" if p.referred_by_type and p.referred_by_type not in ["self", "walk_in"] else "Direct / Self-Walk-in"
+    # 4. Referring Doctors via SQL Group By
+    ref_query = (
+        select(
+            Patient.referred_by_name,
+            Patient.referred_by_type,
+            func.count(func.distinct(Patient.id)).label("pat_count"),
+            func.coalesce(func.sum(Invoice.total_amount), 0.0).label("rev_gen"),
+            func.coalesce(func.sum(Invoice.paid_amount), 0.0).label("col_gen"),
         )
-        doctor_referrals[doc_name]["patients_referred"] += 1
-        doctor_referrals[doc_name]["type"] = p.referred_by_type or "walk_in"
-        pat_invs = [inv for inv in all_invoices if inv.patient_id == p.id]
-        doctor_referrals[doc_name]["revenue_generated"] += sum(float(inv.total_amount or 0) for inv in pat_invs)
-        doctor_referrals[doc_name]["total_collected"] += sum(float(inv.paid_amount or 0) for inv in pat_invs)
+        .outerjoin(Invoice, Invoice.patient_id == Patient.id)
+    )
+    if current_user.tenant_id:
+        ref_query = ref_query.where(Patient.tenant_id == current_user.tenant_id)
+    ref_query = ref_query.group_by(Patient.referred_by_name, Patient.referred_by_type)
+    ref_res = await db.execute(ref_query)
+    ref_rows = ref_res.all()
 
-    referring_doctors = [
-        {
-            "doctor_name": d,
-            "referral_type": stats["type"],
-            "patients_referred": stats["patients_referred"],
-            "revenue_generated": round(stats["revenue_generated"], 2),
-            "total_collected": round(stats["total_collected"], 2),
-            "avg_per_patient": round(stats["revenue_generated"] / (stats["patients_referred"] or 1), 2),
-        }
-        for d, stats in doctor_referrals.items()
-    ]
+    referring_doctors = []
+    for r_name, r_type, p_cnt, r_rev, r_col in ref_rows:
+        doc_name = r_name or (
+            f"Dr. {r_type.title()}" if r_type and r_type not in ["self", "walk_in"] else "Direct / Self-Walk-in"
+        )
+        rev_val = float(r_rev or 0.0)
+        col_val = float(r_col or 0.0)
+        pat_cnt = int(p_cnt or 0)
+        referring_doctors.append({
+            "doctor_name": doc_name,
+            "referral_type": r_type or "walk_in",
+            "patients_referred": pat_cnt,
+            "revenue_generated": round(rev_val, 2),
+            "total_collected": round(col_val, 2),
+            "avg_per_patient": round(rev_val / (pat_cnt or 1), 2),
+        })
     referring_doctors.sort(key=lambda x: x["revenue_generated"], reverse=True)
 
-    # 4. Bed Occupancy Rate from DB
-    bed_res = await db.execute(select(Bed))
-    beds = bed_res.scalars().all()
-    total_beds = len(beds)
-    occupied_beds = sum(1 for b in beds if b.status == "Occupied")
+    # 5. Bed Occupancy Rate from DB via SQL
+    bed_query = select(
+        func.count(Bed.id).label("total_beds"),
+        func.coalesce(func.count(case((Bed.status == "Occupied", 1))), 0).label("occupied_beds"),
+    )
+    bed_res = await db.execute(bed_query)
+    b_row = bed_res.one()
+    total_beds = int(b_row.total_beds or 0)
+    occupied_beds = int(b_row.occupied_beds or 0)
     bed_occupancy_rate = f"{int((occupied_beds / total_beds) * 100)}%" if total_beds > 0 else "0%"
 
-    # 5. Live Patient Count
-    active_patients_count = len(all_patients)
+    # 6. Active Patients Count
+    pat_count_query = select(func.count(Patient.id))
+    if current_user.tenant_id:
+        pat_count_query = pat_count_query.where(Patient.tenant_id == current_user.tenant_id)
+    active_patients_count = (await db.execute(pat_count_query)).scalar_one_or_none() or 0
 
-    # 6. Real Revenue Leakage Prevented (Calculated from resolved invoices)
+    # 7. Revenue Leakage Prevented (Calculated from resolved invoices)
+    leak_prev_query = select(Invoice.items)
+    if current_user.tenant_id:
+        leak_prev_query = leak_prev_query.where(Invoice.tenant_id == current_user.tenant_id)
+    leak_prev_res = await db.execute(leak_prev_query)
     leakage_prevented = 0.0
-    for inv in all_invoices:
-        for it in (inv.items or []):
+    for items_list in leak_prev_res.scalars().all():
+        for it in (items_list or []):
             if it.get("resolved_from_leakage_id"):
                 leakage_prevented += float(it.get("total") or it.get("unit_price") or 0.0)
 
@@ -258,7 +339,7 @@ async def get_revenue_breakdown(
             "occupied_beds": occupied_beds,
             "vacant_beds": max(0, total_beds - occupied_beds),
             "revenue_leakage_prevented": round(leakage_prevented, 2),
-            "invoices_count": len(invoices),
+            "invoices_count": invoices_count,
         },
         "by_department": dept_revenue,
         "monthly_trend": monthly_trend,
@@ -268,6 +349,7 @@ async def get_revenue_breakdown(
 
 
 @router.get("/revenue-leakage")
+@router.get("/revenue-leakage/", include_in_schema=False)
 async def get_revenue_leakage(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -276,35 +358,50 @@ async def get_revenue_leakage(
     Real-time Leakage Detection Engine:
     Detects unbilled investigations, prescriptions, and completed procedures
     recorded in clinical records that lack a corresponding billed invoice.
+    Strictly scoped to current_user.tenant_id.
     """
-    inv_query = select(Invoice)
+    # 1. Gather all existing invoices for this tenant
+    inv_query = select(Invoice.patient_id, Invoice.items)
     if current_user.tenant_id:
         inv_query = inv_query.where(Invoice.tenant_id == current_user.tenant_id)
     res_inv = await db.execute(inv_query)
-    all_invoices = res_inv.scalars().all()
+    all_invoices_data = res_inv.all()
 
     resolved_leakage_ids = set()
     billed_patient_descriptions = defaultdict(set)
-    for inv in all_invoices:
-        for it in (inv.items or []):
+    billed_patient_ids = set()
+    for p_id, items in all_invoices_data:
+        billed_patient_ids.add(p_id)
+        for it in (items or []):
             leak_id = it.get("resolved_from_leakage_id")
             if leak_id:
                 resolved_leakage_ids.add(str(leak_id))
             desc_text = str(it.get("description", "")).lower()
-            billed_patient_descriptions[inv.patient_id].add(desc_text)
+            billed_patient_descriptions[p_id].add(desc_text)
 
+    # 2. Get patients for tenant
     pat_query = select(Patient)
     if current_user.tenant_id:
         pat_query = pat_query.where(Patient.tenant_id == current_user.tenant_id)
     res_pat = await db.execute(pat_query)
     patients = {p.id: p for p in res_pat.scalars().all()}
 
-    res_rec = await db.execute(select(ClinicalRecord).order_by(ClinicalRecord.created_at.desc()))
+    # 3. Get recent clinical records for this tenant only
+    rec_query = (
+        select(ClinicalRecord)
+        .join(Patient, ClinicalRecord.patient_id == Patient.id)
+        .order_by(ClinicalRecord.created_at.desc())
+        .limit(150)
+    )
+    if current_user.tenant_id:
+        rec_query = rec_query.where(Patient.tenant_id == current_user.tenant_id)
+
+    res_rec = await db.execute(rec_query)
     records = res_rec.scalars().all()
 
     leakage_items = []
 
-    # 1. Detect unbilled investigations & prescriptions from clinical records
+    # Detect unbilled investigations & specialized procedures from clinical records
     for r in records:
         pat = patients.get(r.patient_id)
         if not pat:
@@ -367,7 +464,7 @@ async def get_revenue_leakage(
                 })
                 continue
 
-    # 2. Detect unbilled completed appointments
+    # 4. Detect unbilled completed appointments
     completed_appts_q = (
         select(Appointment)
         .where(Appointment.status == AppointmentStatus.COMPLETED)
@@ -400,10 +497,10 @@ async def get_revenue_leakage(
                 "status": "Action Required",
             })
 
-    # 3. If no specific clinical orders were flagged, audit patients who have unbilled files
+    # 5. If no specific clinical orders were flagged, audit patients who have unbilled files
     if len(leakage_items) == 0 and patients:
         for p in patients.values():
-            has_any_inv = any(inv.patient_id == p.id for inv in all_invoices)
+            has_any_inv = p.id in billed_patient_ids
             leak_id = f"LEAK-PAT-{str(p.id)[:8].upper()}"
             if not has_any_inv and leak_id not in resolved_leakage_ids:
                 leakage_items.append({
@@ -435,6 +532,7 @@ async def get_revenue_leakage(
 
 
 @router.get("/no-shows")
+@router.get("/no-shows/", include_in_schema=False)
 async def get_no_show_appointments(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -490,6 +588,7 @@ async def get_no_show_appointments(
 
 
 @router.post("/no-shows/{appointment_id}/send-reminder")
+@router.post("/no-shows/{appointment_id}/send-reminder/", include_in_schema=False)
 async def send_no_show_reminder(
     appointment_id: UUID,
     current_user: User = Depends(get_current_user),
@@ -502,6 +601,9 @@ async def send_no_show_reminder(
     appointment = await db.get(Appointment, appointment_id)
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
+
+    if current_user.tenant_id and appointment.tenant_id and appointment.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Unauthorized access to appointment")
 
     meta = dict(appointment.metadata_ or {})
     reminders = meta.get("reminders_sent", [])
@@ -538,6 +640,7 @@ async def send_no_show_reminder(
 
 
 @router.post("/resolve-leakage")
+@router.post("/resolve-leakage/", include_in_schema=False)
 async def resolve_leakage(
     payload: ResolveLeakagePayload,
     current_user: User = Depends(get_current_user),
