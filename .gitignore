@@ -1,0 +1,68 @@
+# ==============================================================================
+# VaidyaMD HMS Backend — Git Ignore Rules
+# ==============================================================================
+
+# Environment & Secrets (NEVER commit secrets!)
+.env
+.env.*
+*.env
+!.env.example
+!.env.production.example
+*.key
+*.pem
+*.cert
+credentials.json
+key.json
+service-account*.json
+
+# Database Dumps, SQL Scripts & Seed Files
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+*.csv
+*.xlsx
+
+# Python Artifacts & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# User Uploads & Media Storage
+uploads/*
+!uploads/.gitkeep
+
+# IDE & Operating System Artifacts
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

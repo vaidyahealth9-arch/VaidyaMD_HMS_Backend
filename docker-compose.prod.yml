@@ -1,0 +1,63 @@
+services:
+  # Database Service (PostgreSQL 16)
+  vaidya_md_db:
+    image: postgres:16-alpine
+    container_name: vaidya_md_postgres_prod
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vaidya_md_db}
+      POSTGRES_USER: ${POSTGRES_USER:-vaidya_md_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - vaidya_md_pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vaidya_md_admin} -d ${POSTGRES_DB:-vaidya_md_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vaidya_net
+
+  # Backend Service (FastAPI)
+  vaidya_md_backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vaidya_md_backend_prod
+    restart: always
+    environment:
+      ENVIRONMENT: "production"
+      DEBUG: "false"
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-480}
+      SEED_DB: "false"
+      FORCE_DROP_DB: "false"
+      UPLOAD_DIR: /app/uploads
+      CORS_ORIGINS: ${CORS_ORIGINS:-"https://app.vaidyamd.com"}
+    ports:
+      - "8000:8000"
+    volumes:
+      - vaidya_md_uploads_prod:/app/uploads
+    depends_on:
+      vaidya_md_db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - vaidya_net
+
+volumes:
+  vaidya_md_pgdata_prod:
+    driver: local
+  vaidya_md_uploads_prod:
+    driver: local
+
+networks:
+  vaidya_net:
+    driver: bridge

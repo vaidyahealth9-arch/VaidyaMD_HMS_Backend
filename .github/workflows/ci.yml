@@ -1,0 +1,28 @@
+name: VaidyaMD HMS Backend CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Syntax and Compilation Check
+      run: |
+        python -c "import compileall; res = compileall.compile_dir('app', force=True, quiet=1); import sys; sys.exit(0 if res else 1)"
