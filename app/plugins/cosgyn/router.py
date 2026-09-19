@@ -14,9 +14,13 @@ from app.core.models.cosgyn import (
 )
 from app.core.models import Patient
 from app.modules.appointments.model import Appointment, AppointmentStatus
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_active_plugin
 
-router = APIRouter(prefix="/cosgyn", tags=["cosgyn"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    prefix="/cosgyn",
+    tags=["cosgyn"],
+    dependencies=[Depends(get_current_user), Depends(require_active_plugin("cosgyn"))],
+)
 
 # Pydantic Schemas
 

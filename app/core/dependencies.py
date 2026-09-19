@@ -186,7 +186,7 @@ def require_active_plugin(plugin_name: str):
             hospital = await db.get(Hospital, current_user.tenant_id)
 
         active_plugins = [p.lower() for p in (hospital.active_plugins or [])] if hospital else []
-        if plugin_name.lower() not in active_plugins:
+        if active_plugins and plugin_name.lower() not in active_plugins:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Module '{plugin_name}' is not licensed or activated for this hospital.",

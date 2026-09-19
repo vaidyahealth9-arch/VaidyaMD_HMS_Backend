@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from typing import Optional, Any
 from app.core.database import get_db
 from app.core.models import ClinicalRecord, Patient, Invoice
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_active_plugin
 
 # Import fertility sub-routers
 from app.plugins.fertility.routers.treatment_cycles import router as treatment_cycles_router
@@ -43,7 +43,11 @@ from app.plugins.fertility.schemas import (
     DIAGNOSTICS_SCAN_TAGS,
 )
 
-router = APIRouter(prefix="/fertility", tags=["Fertility Plugin"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    prefix="/fertility",
+    tags=["Fertility Plugin"],
+    dependencies=[Depends(get_current_user), Depends(require_active_plugin("fertility"))],
+)
 
 
 # Mount Sub-Routers
