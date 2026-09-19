@@ -162,6 +162,8 @@ class PatientResponse(BaseModel):
     clinical_notes: Optional[list[str]] = []
     tenant_id: UUID
     branch_id: Optional[UUID] = None
+    branch_name: Optional[str] = None
+    branch_code: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

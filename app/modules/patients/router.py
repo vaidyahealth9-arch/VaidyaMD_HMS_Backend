@@ -5,7 +5,7 @@ from uuid import UUID
 from datetime import date
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_branch_context
 from app.core.models import User
 from app.modules.patients.schemas import (
     PatientCreate,
@@ -43,7 +43,7 @@ async def list_patients(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=1000),
     search: Optional[str] = Query(None),
-    branch_id: Optional[UUID] = None,
+    branch_id: Optional[UUID] = Depends(get_branch_context),
     current_user: User = Depends(get_current_user),
     service: PatientService = Depends(get_patient_service),
 ):

@@ -165,7 +165,13 @@ class AppointmentService:
         if filters.get("branch_id") or filters.get("gender"):
             query = query.join(Patient, Appointment.patient_id == Patient.id)
             if filters.get("branch_id"):
-                query = query.where(Patient.branch_id == filters["branch_id"])
+                b_id = filters["branch_id"]
+                query = query.where(
+                    or_(
+                        Appointment.branch_id == b_id,
+                        and_(Appointment.branch_id.is_(None), Patient.branch_id == b_id),
+                    )
+                )
             if filters.get("gender"):
                 query = query.where(Patient.gender == filters["gender"])
 

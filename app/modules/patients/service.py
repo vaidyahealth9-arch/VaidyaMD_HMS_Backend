@@ -11,6 +11,8 @@ from app.modules.patients.schemas import PatientCreate, PatientUpdate, PatientRe
 from app.modules.patients.exceptions import PatientNotFoundError, PartnerLinkError
 from app.core.security import encrypt_pii, mask_pii
 
+from sqlalchemy.orm import selectinload
+
 class PatientService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -29,6 +31,7 @@ class PatientService:
         return f"VH-{code}-{base_num:07d}-{random.randint(100, 999)}"
 
     def build_patient_response(self, patient: Patient, partner: Optional[Patient] = None) -> PatientResponse:
+        b_obj = getattr(patient, 'branch', None)
         return PatientResponse(
             id=patient.id,
             vid=patient.vid,
@@ -72,12 +75,14 @@ class PatientService:
             clinical_notes=patient.clinical_notes or [],
             tenant_id=patient.tenant_id,
             branch_id=patient.branch_id,
+            branch_name=b_obj.name if b_obj else None,
+            branch_code=b_obj.code if b_obj else None,
             created_at=patient.created_at,
             updated_at=patient.updated_at,
         )
 
     async def create_patient(self, patient_data: PatientCreate, tenant_id: UUID) -> PatientResponse:
-        result = await self.db.execute(select(Hospital).limit(1))
+        result = await self.db.execute(select(Hospital).where(Hospital.id == tenant_id))
         hospital = result.scalar_one_or_none()
         h_code = hospital.code if hospital else "VMD"
         vid = await self.generate_vid(h_code)
@@ -149,7 +154,10 @@ class PatientService:
         return self.build_patient_response(patient, partner)
 
     async def get_patient(self, patient_id: UUID) -> PatientResponse:
-        patient = await self.db.get(Patient, patient_id)
+        result = await self.db.execute(
+            select(Patient).options(selectinload(Patient.branch)).where(Patient.id == patient_id)
+        )
+        patient = result.scalar_one_or_none()
         if not patient:
             raise PatientNotFoundError(f"Patient with ID {patient_id} not found")
         partner = await self.db.get(Patient, patient.partner_id) if patient.partner_id else None
@@ -176,8 +184,8 @@ class PatientService:
         count_query = select(func.count()).select_from(query.subquery())
         total = await self.db.scalar(count_query) or 0
         
-        # Get paginated data
-        query = query.order_by(desc(Patient.created_at)).offset((page - 1) * per_page).limit(per_page)
+        # Get paginated data with branch preloaded
+        query = query.options(selectinload(Patient.branch)).order_by(desc(Patient.created_at)).offset((page - 1) * per_page).limit(per_page)
         result = await self.db.execute(query)
         patients = result.scalars().all()
         
@@ -196,9 +204,26 @@ class PatientService:
         )
 
     async def get_timeline(self, patient_id: UUID) -> dict:
-        patient = await self.db.get(Patient, patient_id)
+        result = await self.db.execute(
+            select(Patient).options(selectinload(Patient.branch)).where(Patient.id == patient_id)
+        )
+        patient = result.scalar_one_or_none()
         if not patient:
             raise PatientNotFoundError(f"Patient with ID {patient_id} not found")
+
+        from app.core.models.branch import Branch
+        b_res = await self.db.execute(select(Branch).where(Branch.hospital_id == patient.tenant_id))
+        branches_map = {b.id: b for b in b_res.scalars().all()}
+
+        def get_branch_meta(b_id):
+            if not b_id:
+                return {"branch_id": None, "branch_name": "Hospital Network", "branch_code": "NET"}
+            b = branches_map.get(b_id)
+            return {
+                "branch_id": str(b_id),
+                "branch_name": b.name if b else "Unknown Branch",
+                "branch_code": b.code if b else "—",
+            }
 
         events = []
 
@@ -209,6 +234,7 @@ class PatientService:
                 "title": "Patient Registered",
                 "description": f"Patient registration completed under {patient.vid} ({patient.registration_type or 'General'}).",
                 "created_at": patient.created_at.isoformat() if hasattr(patient.created_at, 'isoformat') else str(patient.created_at),
+                "branch": get_branch_meta(patient.branch_id),
                 "metadata": {
                     "vid": patient.vid,
                     "gender": patient.gender,
@@ -226,6 +252,7 @@ class PatientService:
                 "title": f"Appointment — {apt.department or 'OPD'} ({apt.visit_type or 'Consultation'})",
                 "description": f"Status: {str(apt.status).capitalize()} · {apt.notes or 'Routine attendance'}".strip(),
                 "created_at": apt.created_at.isoformat() if hasattr(apt.created_at, 'isoformat') else str(apt.created_at),
+                "branch": get_branch_meta(apt.branch_id or patient.branch_id),
                 "metadata": {
                     "status": str(apt.status),
                     "department": apt.department,
@@ -244,6 +271,7 @@ class PatientService:
                 "title": f"Consultation ({str(cr.record_type).replace('_', ' ').title()})",
                 "description": f"Dx: {rec_d.get('provisional_diagnosis') or rec_d.get('chief_complaints') or 'Clinical Review'}",
                 "created_at": cr.created_at.isoformat() if hasattr(cr.created_at, 'isoformat') else str(cr.created_at),
+                "branch": get_branch_meta(cr.branch_id or patient.branch_id),
                 "metadata": {
                     "record_type": cr.record_type,
                     "plugin_id": cr.plugin_id,
@@ -261,6 +289,7 @@ class PatientService:
                 "title": f"Invoice #{inv.invoice_number}",
                 "description": f"Billed: ₹{float(inv.total_amount or 0):,.2f} · Status: {str(inv.status).upper()}",
                 "created_at": inv.created_at.isoformat() if hasattr(inv.created_at, 'isoformat') else str(inv.created_at),
+                "branch": get_branch_meta(inv.branch_id or patient.branch_id),
                 "metadata": {
                     "total_amount": float(inv.total_amount or 0),
                     "status": str(inv.status),
@@ -280,6 +309,7 @@ class PatientService:
                     "title": f"Fertility Cycle ({tc.treatment_type or 'IVF'}) - {tc.cycle_id}",
                     "description": f"Attempt #{tc.attempt_number} · Status: {tc.status.value if hasattr(tc.status, 'value') else tc.status}",
                     "created_at": tc.created_at.isoformat() if hasattr(tc.created_at, 'isoformat') else str(tc.created_at),
+                    "branch": get_branch_meta(getattr(tc, 'branch_id', None) or patient.branch_id),
                     "metadata": {
                         "cycle_id": tc.cycle_id,
                         "treatment_type": tc.treatment_type,

@@ -4,7 +4,7 @@ from uuid import UUID
 from datetime import date
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_branch_context
 from app.core.models import User
 from app.modules.appointments.schemas import AppointmentCreate, AppointmentUpdate, AppointmentResponse, AppointmentListResponse, TriageUpdate
 from app.modules.appointments.service import AppointmentService
@@ -39,7 +39,7 @@ async def list_appointments(
     status: str = Query(None),
     gender: str = Query(None),
     department: str = Query(None),
-    branch_id: UUID = Query(None),
+    branch_id: Optional[UUID] = Depends(get_branch_context),
     patient_id: UUID = Query(None),
     current_user: User = Depends(get_current_user),
     service: AppointmentService = Depends(get_appointment_service),
