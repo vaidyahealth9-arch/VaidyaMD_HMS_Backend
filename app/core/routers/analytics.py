@@ -529,7 +529,8 @@ async def send_no_show_reminder(
 
     return {
         "status": "success",
-        "message": "WhatsApp reminder successfully recorded and dispatched.",
+        "message": "WhatsApp recall reminder logged (SMS/WhatsApp gateway integration pending).",
+        "wip": True,
         "appointment_id": str(appointment.id),
         "sent_at": now_str,
         "reminders_count": len(reminders),
@@ -552,9 +553,7 @@ async def resolve_leakage(
 
     tenant_id = current_user.tenant_id or patient.tenant_id
     if not tenant_id:
-        res_hosp = await db.execute(select(Hospital).limit(1))
-        hosp = res_hosp.scalar_one_or_none()
-        tenant_id = hosp.id if hosp else None
+        raise HTTPException(status_code=403, detail="Tenant context required to resolve revenue leakage")
 
     inv_num = f"INV-LEAK-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
     invoice = Invoice(
@@ -592,4 +591,5 @@ async def resolve_leakage(
         "invoice_id": str(invoice.id),
         "invoice_number": inv_num,
         "amount": payload.amount,
+        "wip": True,
     }
