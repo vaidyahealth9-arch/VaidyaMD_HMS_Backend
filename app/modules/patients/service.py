@@ -1,11 +1,11 @@
 import random
-from typing import Optional
+from typing import Optional, Any
 from uuid import UUID
 from datetime import datetime, date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_
 
-from app.core.models import Hospital, Appointment, ClinicalRecord, Document, TreatmentCycle, Invoice
+from app.core.models import Hospital, Appointment, ClinicalRecord, Document, TreatmentCycle, Invoice, User
 from app.modules.patients.model import Patient, RegistrationType, Gender
 from app.modules.patients.schemas import PatientCreate, PatientUpdate, PatientResponse, PatientListResponse, AlertNotesUpdate, ClinicalNotesUpdate, ConsentCreate
 from app.modules.patients.exceptions import PatientNotFoundError, PartnerLinkError
