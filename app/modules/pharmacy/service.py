@@ -17,9 +17,10 @@ class PharmacyService:
 
 
 
-    async def list_inventory_batches(self, category: str = None, search: str = None):
-
+    async def list_inventory_batches(self, category: str = None, search: str = None, tenant_id: UUID = None):
         query = select(InventoryBatch).order_by(InventoryBatch.expiry_date.asc())
+        if tenant_id:
+            query = query.where(InventoryBatch.tenant_id == tenant_id)
         if category:
             query = query.where(InventoryBatch.category == category)
         res = await self.db.execute(query)
@@ -30,23 +31,15 @@ class PharmacyService:
         return batches
 
     async def dispense_fefo(self, payload: DispenseRequest, current_user=None):
-
         patient = await self.db.get(Patient, payload.patient_id)
         if not patient:
             raise ValueError("Patient not found")
 
         tenant_id = getattr(patient, 'tenant_id', None) or (current_user.tenant_id if current_user else None)
         if not tenant_id:
-            hosp_res = await self.db.execute(select(Hospital).limit(1))
-            hosp = hosp_res.scalar_one_or_none()
-            tenant_id = hosp.id if hosp else None
+            raise ValueError("Tenant context required for pharmacy dispense")
 
         creator_id = (current_user.id if current_user else None) or payload.doctor_id or patient.treating_doctor_id
-        if not creator_id:
-            from app.core.models import User
-            admin_res = await self.db.execute(select(User).limit(1))
-            admin = admin_res.scalar_one_or_none()
-            creator_id = admin.id if admin else None
 
         dispensed_items_audit = []
         total_bill = 0.0
@@ -56,6 +49,7 @@ class PharmacyService:
             res = await self.db.execute(
                 select(InventoryBatch)
                 .where(
+                    InventoryBatch.tenant_id == tenant_id,
                     InventoryBatch.item_code == item.item_code,
                     InventoryBatch.quantity_available > 0,
                     InventoryBatch.is_active == True,
@@ -124,17 +118,20 @@ class PharmacyService:
             "dispensed_batches": dispensed_items_audit,
         }
 
-    async def list_indents(self, status: str = None):
+    async def list_indents(self, status: str = None, tenant_id: UUID = None):
         query = select(PharmacyIndent).order_by(PharmacyIndent.created_at.desc())
+        if tenant_id:
+            query = query.where(PharmacyIndent.tenant_id == tenant_id)
         if status:
             query = query.where(PharmacyIndent.status == status)
         res = await self.db.execute(query)
         return res.scalars().all()
 
-    async def create_indent(self, payload: IndentCreate):
+    async def create_indent(self, payload: IndentCreate, tenant_id: UUID):
         indent_num = f"IND-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
         indent = PharmacyIndent(
             indent_number=indent_num,
+            tenant_id=tenant_id,
             requesting_department=payload.requesting_department,
             requested_by_id=payload.requested_by_id,
             urgency=payload.urgency,
@@ -155,17 +152,20 @@ class PharmacyService:
         await self.db.flush()
         return {"message": f"Indent status updated to {payload.status}", "indent": indent}
 
-    async def list_purchase_orders(self, status: str = None):
+    async def list_purchase_orders(self, status: str = None, tenant_id: UUID = None):
         query = select(PurchaseOrder).order_by(PurchaseOrder.created_at.desc())
+        if tenant_id:
+            query = query.where(PurchaseOrder.tenant_id == tenant_id)
         if status:
             query = query.where(PurchaseOrder.status == status)
         res = await self.db.execute(query)
         return res.scalars().all()
 
-    async def create_purchase_order(self, payload: PurchaseOrderCreate):
+    async def create_purchase_order(self, payload: PurchaseOrderCreate, tenant_id: UUID):
         po_num = f"PO-{datetime.utcnow().strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
         po = PurchaseOrder(
             po_number=po_num,
+            tenant_id=tenant_id,
             vendor_name=payload.vendor_name,
             vendor_gst=payload.vendor_gst,
             vendor_contact=payload.vendor_contact,
@@ -180,17 +180,20 @@ class PharmacyService:
         await self.db.refresh(po)
         return po
 
-    async def list_grns(self, status: str = None):
+    async def list_grns(self, status: str = None, tenant_id: UUID = None):
         query = select(GoodsReceivedNote).order_by(GoodsReceivedNote.created_at.desc())
+        if tenant_id:
+            query = query.where(GoodsReceivedNote.tenant_id == tenant_id)
         if status:
             query = query.where(GoodsReceivedNote.status == status)
         res = await self.db.execute(query)
         return res.scalars().all()
 
-    async def create_grn(self, payload: GRNCreate):
+    async def create_grn(self, payload: GRNCreate, tenant_id: UUID):
         grn_num = f"GRN-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
         grn = GoodsReceivedNote(
             grn_number=grn_num,
+            tenant_id=tenant_id,
             po_id=payload.po_id,
             invoice_number=payload.invoice_number,
             invoice_date=payload.invoice_date or date.today(),
@@ -221,6 +224,7 @@ class PharmacyService:
                     pass
 
             batch = InventoryBatch(
+                tenant_id=grn.tenant_id,
                 item_code=item.get("item_code", f"DRUG-{uuid.uuid4().hex[:6].upper()}"),
                 item_name=item.get("item_name", "Pharmaceutical Product"),
                 generic_name=item.get("generic_name", "Active Ingredient"),

@@ -205,8 +205,10 @@ class BillingService:
         patient = await self.db.get(Patient, invoice.patient_id)
         return self._build_invoice_response(invoice, patient)
 
-    async def list_packages(self, plugin_id: str = None) -> list[TreatmentPackage]:
+    async def list_packages(self, plugin_id: str = None, tenant_id: UUID = None) -> list[TreatmentPackage]:
         query = select(TreatmentPackage).where(TreatmentPackage.is_active == True)
+        if tenant_id:
+            query = query.where(TreatmentPackage.tenant_id == tenant_id)
         if plugin_id:
             query = query.where(TreatmentPackage.plugin_id == plugin_id)
         result = await self.db.execute(query)

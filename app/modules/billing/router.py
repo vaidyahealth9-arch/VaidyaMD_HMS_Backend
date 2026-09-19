@@ -86,24 +86,22 @@ async def add_invoice_payment(
         raise HTTPException(status_code=404, detail=str(e))
 
 @router.get("/packages", response_model=list[TreatmentPackageSchema])
+@router.get("/packages/", response_model=list[TreatmentPackageSchema], include_in_schema=False)
 async def list_packages(
     plugin_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     service: BillingService = Depends(get_billing_service),
 ):
-    return await service.list_packages(plugin_id)
+    return await service.list_packages(plugin_id, tenant_id=current_user.tenant_id)
 
 @router.post("/packages", response_model=TreatmentPackageSchema, status_code=201)
+@router.post("/packages/", response_model=TreatmentPackageSchema, status_code=201, include_in_schema=False)
 async def create_package(
     data: TreatmentPackageSchema,
     current_user: User = Depends(get_current_user),
     service: BillingService = Depends(get_billing_service),
 ):
-    tenant_id = current_user.tenant_id
-    if not tenant_id:
-        from app.core.models import Hospital
-        from sqlalchemy import select
-        result = await service.db.execute(select(Hospital).limit(1))
-        hospital = result.scalar_one_or_none()
-        tenant_id = hospital.id if hospital else None
-    return await service.create_package(data, tenant_id)
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required to create packages")
+    return await service.create_package(data, current_user.tenant_id)
+
