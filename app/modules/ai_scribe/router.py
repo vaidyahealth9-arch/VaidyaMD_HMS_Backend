@@ -37,8 +37,8 @@ async def parse_ambient_scribe(request: Request):
     extracted_data = AIScribeService.parse_clinical_transcript(transcript)
 
     return {
-        "status": "success",
-        "model": "vaidya-clinical-scribe-v2.5-nlp",
+        "status": "awaiting_integration",
+        "model": "not_configured",
         "extracted_data": extracted_data,
-        "message": "Ambient voice consultation parsed successfully into clinical schema.",
+        "message": "Ambient AI Scribe integration is pending LLM pipeline setup.",
     }
