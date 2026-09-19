@@ -21,6 +21,7 @@ from app.modules.wallet.model import PatientWallet, WalletTransaction, WalletTxT
 from app.modules.ipd.model import Ward, Bed, IPDAdmission, NursingTask
 from app.modules.pharmacy.model import PharmacyIndent, PurchaseOrder, GoodsReceivedNote, InventoryBatch
 from app.modules.counseling.models import CounselingNote
+from app.modules.auth.models import RefreshToken
 
 # Specialty Plugins (Plug-and-Play Verticals)
 from app.plugins.fertility.models import (
@@ -53,6 +54,7 @@ __all__ = [
     "Ward", "Bed", "IPDAdmission", "NursingTask",
     "PharmacyIndent", "PurchaseOrder", "GoodsReceivedNote", "InventoryBatch",
     "CounselingNote",
+    "RefreshToken",
     # Fertility Plugin
     "TreatmentCycle", "TreatmentCycleStatus",
     "TreatmentCycleType",

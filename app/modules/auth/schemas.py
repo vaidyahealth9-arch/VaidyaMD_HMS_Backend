@@ -31,9 +31,14 @@ class UserUpdateRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     user: UserResponse
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
 
 class SwitchRoleRequest(BaseModel):
     role: str
     department: Optional[str] = None
+
