@@ -10,6 +10,7 @@ class PharmacyIndent(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     indent_number = Column(String(50), nullable=False, unique=True)
     requesting_department = Column(String(100), default="OPD")
     requested_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
@@ -29,6 +30,7 @@ class PurchaseOrder(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     po_number = Column(String(50), nullable=False, unique=True)
     vendor_name = Column(String(150), nullable=False)
     vendor_gst = Column(String(50), nullable=True)
@@ -48,6 +50,7 @@ class GoodsReceivedNote(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     grn_number = Column(String(50), nullable=False, unique=True)
     po_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id"), nullable=True)
     invoice_number = Column(String(100), nullable=False)
@@ -71,6 +74,7 @@ class InventoryBatch(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     item_code = Column(String(50), nullable=False)
     item_name = Column(String(150), nullable=False)
     generic_name = Column(String(150), nullable=True)

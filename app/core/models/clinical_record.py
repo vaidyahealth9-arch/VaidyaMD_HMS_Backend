@@ -14,6 +14,8 @@ class ClinicalRecord(Base):
     __tablename__ = "clinical_records"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=True)
     plugin_id = Column(String(50), nullable=False, comment="E.g. 'fertility', 'opd'")
 

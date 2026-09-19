@@ -85,7 +85,16 @@ class PharmacyService:
                     "rack_location": batch.rack_location,
                 })
 
-        inv_num = f"INV-PHARMA-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+        branch_id = getattr(payload, 'branch_id', None) or getattr(patient, 'branch_id', None) or (getattr(current_user, 'branch_id', None) if current_user else None)
+        branch_code = None
+        if branch_id:
+            from app.core.models.branch import Branch
+            b = await self.db.get(Branch, branch_id)
+            if b and b.code:
+                branch_code = b.code
+
+        inv_prefix = f"INV-PHARMA-{branch_code}" if branch_code else "INV-PHARMA"
+        inv_num = f"{inv_prefix}-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
         invoice = Invoice(
             invoice_number=inv_num,
             patient_id=payload.patient_id,
@@ -99,7 +108,7 @@ class PharmacyService:
             items=dispensed_items_audit,
             notes=payload.notes or "Dispensed via Pharmacy FEFO engine",
             tenant_id=tenant_id,
-            branch_id=getattr(patient, 'branch_id', None),
+            branch_id=branch_id,
             created_by=creator_id,
         )
         self.db.add(invoice)
@@ -128,10 +137,20 @@ class PharmacyService:
         return res.scalars().all()
 
     async def create_indent(self, payload: IndentCreate, tenant_id: UUID):
-        indent_num = f"IND-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+        branch_id = getattr(payload, "branch_id", None)
+        branch_code = None
+        if branch_id:
+            from app.core.models.branch import Branch
+            b = await self.db.get(Branch, branch_id)
+            if b and b.code:
+                branch_code = b.code
+
+        indent_prefix = f"IND-{branch_code}" if branch_code else "IND"
+        indent_num = f"{indent_prefix}-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
         indent = PharmacyIndent(
             indent_number=indent_num,
             tenant_id=tenant_id,
+            branch_id=branch_id,
             requesting_department=payload.requesting_department,
             requested_by_id=payload.requested_by_id,
             urgency=payload.urgency,
@@ -162,10 +181,20 @@ class PharmacyService:
         return res.scalars().all()
 
     async def create_purchase_order(self, payload: PurchaseOrderCreate, tenant_id: UUID):
-        po_num = f"PO-{datetime.utcnow().strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
+        branch_id = getattr(payload, "branch_id", None)
+        branch_code = None
+        if branch_id:
+            from app.core.models.branch import Branch
+            b = await self.db.get(Branch, branch_id)
+            if b and b.code:
+                branch_code = b.code
+
+        po_prefix = f"PO-{branch_code}" if branch_code else "PO"
+        po_num = f"{po_prefix}-{datetime.utcnow().strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
         po = PurchaseOrder(
             po_number=po_num,
             tenant_id=tenant_id,
+            branch_id=branch_id,
             vendor_name=payload.vendor_name,
             vendor_gst=payload.vendor_gst,
             vendor_contact=payload.vendor_contact,
@@ -190,10 +219,20 @@ class PharmacyService:
         return res.scalars().all()
 
     async def create_grn(self, payload: GRNCreate, tenant_id: UUID):
-        grn_num = f"GRN-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+        branch_id = getattr(payload, "branch_id", None)
+        branch_code = None
+        if branch_id:
+            from app.core.models.branch import Branch
+            b = await self.db.get(Branch, branch_id)
+            if b and b.code:
+                branch_code = b.code
+
+        grn_prefix = f"GRN-{branch_code}" if branch_code else "GRN"
+        grn_num = f"{grn_prefix}-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
         grn = GoodsReceivedNote(
             grn_number=grn_num,
             tenant_id=tenant_id,
+            branch_id=branch_id,
             po_id=payload.po_id,
             invoice_number=payload.invoice_number,
             invoice_date=payload.invoice_date or date.today(),
@@ -225,6 +264,7 @@ class PharmacyService:
 
             batch = InventoryBatch(
                 tenant_id=grn.tenant_id,
+                branch_id=grn.branch_id,
                 item_code=item.get("item_code", f"DRUG-{uuid.uuid4().hex[:6].upper()}"),
                 item_name=item.get("item_name", "Pharmaceutical Product"),
                 generic_name=item.get("generic_name", "Active Ingredient"),

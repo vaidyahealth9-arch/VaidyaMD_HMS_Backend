@@ -26,7 +26,8 @@ class Document(Base):
 
     # Audit
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

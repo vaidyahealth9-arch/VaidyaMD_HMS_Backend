@@ -658,7 +658,16 @@ async def resolve_leakage(
     if not tenant_id:
         raise HTTPException(status_code=403, detail="Tenant context required to resolve revenue leakage")
 
-    inv_num = f"INV-LEAK-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+    branch_id = getattr(patient, 'branch_id', None) or getattr(current_user, 'branch_id', None)
+    branch_code = None
+    if branch_id:
+        from app.core.models.branch import Branch
+        b = await db.get(Branch, branch_id)
+        if b and b.code:
+            branch_code = b.code
+
+    leak_prefix = f"INV-LEAK-{branch_code}" if branch_code else "INV-LEAK"
+    inv_num = f"{leak_prefix}-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
     invoice = Invoice(
         invoice_number=inv_num,
         patient_id=payload.patient_id,
@@ -682,6 +691,7 @@ async def resolve_leakage(
         ],
         payment_method="cash",
         tenant_id=tenant_id,
+        branch_id=branch_id,
         created_by=current_user.id,
         notes=f"Generated via Revenue Leakage Engine from Item {payload.leakage_item_id}",
     )

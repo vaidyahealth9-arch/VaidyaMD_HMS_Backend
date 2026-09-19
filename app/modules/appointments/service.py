@@ -33,6 +33,7 @@ class AppointmentService:
             notes=apt.notes,
             metadata_=apt.metadata_,
             tenant_id=apt.tenant_id,
+            branch_id=apt.branch_id,
             created_at=apt.created_at,
         )
 
@@ -53,12 +54,10 @@ class AppointmentService:
         if not dept:
             if doctor.departments and len(doctor.departments) > 0:
                 dept = doctor.departments[0]
-            elif doctor.specialization:
-                dept = doctor.specialization
             else:
-                dept = "Fertility / IVF"
+                dept = "General"
 
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         existing_q = await self.db.execute(
             select(Appointment).where(
                 and_(
@@ -77,6 +76,8 @@ class AppointmentService:
         if data.metadata:
             meta.update(data.metadata)
 
+        branch_id = getattr(data, 'branch_id', None) or getattr(patient, 'branch_id', None)
+
         appointment = Appointment(
             patient_id=data.patient_id,
             doctor_id=data.doctor_id,
@@ -86,6 +87,7 @@ class AppointmentService:
             notes=data.notes,
             metadata_=meta,
             tenant_id=tenant_id,
+            branch_id=branch_id,
         )
         if data.status:
             appointment.status = data.status
@@ -95,9 +97,18 @@ class AppointmentService:
         # Auto-create pending consultation invoice if fee is charged
         if data.consultation_fee and float(data.consultation_fee) > 0:
             from app.modules.billing.model import Invoice, InvoiceStatus
+            from app.core.models.branch import Branch
             import uuid
             fee = float(data.consultation_fee)
-            inv_num = f"INV-OPD-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+
+            branch_code = None
+            if branch_id:
+                b = await self.db.get(Branch, branch_id)
+                if b and b.code:
+                    branch_code = b.code
+
+            prefix = f"INV-OPD-{branch_code}" if branch_code else "INV-OPD"
+            inv_num = f"{prefix}-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
             invoice = Invoice(
                 invoice_number=inv_num,
                 patient_id=data.patient_id,
@@ -114,7 +125,7 @@ class AppointmentService:
                 total_amount=fee,
                 status=InvoiceStatus.PENDING,
                 tenant_id=tenant_id,
-                branch_id=getattr(patient, 'branch_id', None),
+                branch_id=branch_id,
                 created_by=data.doctor_id,
                 notes=f"Generated upon OPD Queue check-in for {patient.name}"
             )

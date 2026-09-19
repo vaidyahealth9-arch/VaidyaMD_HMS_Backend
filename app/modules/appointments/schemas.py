@@ -13,6 +13,7 @@ class AppointmentCreate(BaseModel):
     notes: Optional[str] = None
     consultation_fee: Optional[float] = None
     metadata: Optional[dict] = None
+    branch_id: Optional[UUID] = None
 
 class AppointmentUpdate(BaseModel):
     status: Optional[str] = None
@@ -40,6 +41,7 @@ class AppointmentResponse(BaseModel):
     notes: Optional[str] = None
     metadata_: dict = {}
     tenant_id: UUID
+    branch_id: Optional[UUID] = None
     created_at: datetime
 
     @field_serializer("scheduled_at", "created_at", when_used="json")

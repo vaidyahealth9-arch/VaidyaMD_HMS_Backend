@@ -12,6 +12,7 @@ class ManualLabReportCreate(BaseModel):
     observations: dict[str, Any] = {}
     pathologist_notes: Optional[str] = None
     status: str = "Pending Authorization"
+    branch_id: Optional[UUID] = None
 
 class ReportAuthorizeRequest(BaseModel):
     pathologist_id: Optional[UUID] = None

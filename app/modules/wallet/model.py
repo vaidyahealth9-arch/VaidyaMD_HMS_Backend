@@ -18,7 +18,8 @@ class PatientWallet(Base):
     patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), unique=True, nullable=False)
     balance = Column(Numeric(12, 2), default=0.00, nullable=False)
 
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -29,6 +30,8 @@ class WalletTransaction(Base):
     __tablename__ = "wallet_transactions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     wallet_id = Column(UUID(as_uuid=True), ForeignKey("patient_wallets.id"), nullable=False)
     transaction_type = Column(Enum(WalletTxType), nullable=False)
     amount = Column(Numeric(12, 2), nullable=False)
@@ -37,7 +40,6 @@ class WalletTransaction(Base):
 
     notes = Column(Text, nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     wallet = relationship("PatientWallet", back_populates="transactions")

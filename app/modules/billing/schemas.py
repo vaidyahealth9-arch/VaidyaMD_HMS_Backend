@@ -24,6 +24,7 @@ class InvoiceCreate(BaseModel):
     upi_pay_mode: Optional[str] = None
     notes: Optional[str] = None
     created_by: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
 
 class InvoiceResponse(BaseModel):
     id: UUID
@@ -46,6 +47,7 @@ class InvoiceResponse(BaseModel):
     upi_pay_mode: Optional[str] = None
     notes: Optional[str] = None
     tenant_id: UUID
+    branch_id: Optional[UUID] = None
     created_at: datetime
 
     class Config:

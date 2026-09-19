@@ -14,7 +14,8 @@ class PermissionProfile(Base):
     __tablename__ = "permission_profiles"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    hospital_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id"), nullable=False)
+    hospital_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     name = Column(String(100), nullable=False, comment="Profile name, e.g. Doctor, Nurse, Embryologist")
     description = Column(Text)
     menu_permissions = Column(

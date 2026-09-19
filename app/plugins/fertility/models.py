@@ -28,6 +28,8 @@ class TreatmentCycleType(Base):
     __tablename__ = "treatment_cycle_types"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=True, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     name = Column(String(150), nullable=False, unique=True, comment="E.g. ICSI + PGT-A, IUI*, Surrogate Commissioning Couple")
     display_order = Column(Integer, default=0, comment="Sort order for UI display")
     is_active = Column(Boolean, default=True)
@@ -89,7 +91,8 @@ class TreatmentCycle(Base):
     )
     remarks = Column(Text)
 
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -113,6 +116,8 @@ class OocyteRecord(Base):
     __tablename__ = "oocyte_records"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=True, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     treatment_cycle_id = Column(UUID(as_uuid=True), ForeignKey("treatment_cycles.id"), nullable=False)
     oocyte_number = Column(Integer, nullable=False, comment="1..N")
 
@@ -155,6 +160,8 @@ class EmbryologyWitness(Base):
     __tablename__ = "embryology_witnesses"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=True, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     treatment_cycle_id = Column(UUID(as_uuid=True), ForeignKey("treatment_cycles.id"), nullable=False)
     day_number = Column(Integer, nullable=False, comment="Day 0 to 7")
     witness_type = Column(String(50), nullable=False, comment="OPU, INSEMINATION, FERT_CHECK, STRIP, BIOPSY, ET, FREEZING, THAW")
@@ -190,6 +197,8 @@ class CryoSample(Base):
     __tablename__ = "cryo_samples"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=True, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, comment="Female/Primary owner")
     partner_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=True, comment="Male/Partner owner")
     treatment_cycle_id = Column(UUID(as_uuid=True), ForeignKey("treatment_cycles.id"), nullable=True)

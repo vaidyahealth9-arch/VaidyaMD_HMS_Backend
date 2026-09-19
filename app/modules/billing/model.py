@@ -60,5 +60,6 @@ class TreatmentPackage(Base):
     items = Column(JSONB, nullable=False)
     base_price = Column(Numeric(12, 2), nullable=False)
     is_active = Column(Boolean, default=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -9,6 +9,8 @@ class ClinicalTemplate(Base):
     __tablename__ = "clinical_templates"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     plugin_id = Column(String(50), nullable=False)
     record_type = Column(String(100), nullable=False, unique=True)
     title = Column(String(255), nullable=False)
@@ -26,7 +28,9 @@ class ProtocolTemplate(Base):
     __tablename__ = "protocol_templates"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    hospital_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    hospital_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
     category = Column(String(50), default="stimulation")
@@ -36,7 +40,7 @@ class ProtocolTemplate(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    hospital = relationship("Hospital")
+    hospital = relationship("Hospital", foreign_keys=[hospital_id])
     creator = relationship("User", foreign_keys=[created_by])
     rules = relationship("ProtocolDrugRule", back_populates="protocol_template", cascade="all, delete-orphan", order_by="ProtocolDrugRule.sort_order")
     treatment_cycles = relationship("TreatmentCycle", back_populates="protocol_template")
@@ -45,6 +49,8 @@ class ProtocolDrugRule(Base):
     __tablename__ = "protocol_drug_rules"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=True, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     protocol_template_id = Column(UUID(as_uuid=True), ForeignKey("protocol_templates.id"), nullable=False)
     drug_name = Column(String(255), nullable=False)
     dose = Column(String(100), nullable=False)

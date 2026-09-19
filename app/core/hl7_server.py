@@ -122,6 +122,8 @@ async def save_hl7_clinical_record(parsed_data: dict[str, Any], tenant_id: Optio
 
         record = ClinicalRecord(
             patient_id=patient.id,
+            tenant_id=patient.tenant_id,
+            branch_id=patient.branch_id,
             plugin_id=plugin_id,
             record_type=record_type,
             schema_version="1.0",

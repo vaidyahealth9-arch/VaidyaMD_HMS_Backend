@@ -17,7 +17,17 @@ class LIMSService:
         if not patient:
             raise ValueError("Patient not found")
 
-        sample_id = payload.sample_id or f"LAB-{datetime.utcnow().strftime('%y%m')}-{uuid.uuid4().hex[:4].upper()}"
+        tenant_id = getattr(patient, 'tenant_id', None) or (getattr(current_user, 'tenant_id', None) if current_user else None)
+        branch_id = getattr(payload, 'branch_id', None) or getattr(patient, 'branch_id', None) or (getattr(current_user, 'branch_id', None) if current_user else None)
+        branch_code = None
+        if branch_id:
+            from app.core.models.branch import Branch
+            b = await self.db.get(Branch, branch_id)
+            if b and b.code:
+                branch_code = b.code
+
+        prefix = f"LAB-{branch_code}" if branch_code else "LAB"
+        sample_id = payload.sample_id or f"{prefix}-{datetime.utcnow().strftime('%y%m')}-{uuid.uuid4().hex[:4].upper()}"
 
         record_data = {
             "sample_id": sample_id,
@@ -35,6 +45,8 @@ class LIMSService:
 
         record = ClinicalRecord(
             patient_id=payload.patient_id,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
             plugin_id="lims",
             record_type="diagnostic_lab_report",
             schema_version="1.0",

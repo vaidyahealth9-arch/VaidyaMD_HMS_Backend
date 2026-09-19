@@ -31,6 +31,8 @@ class CosgynTreatment(Base):
     __tablename__ = "cosgyn_treatments"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=True, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     name = Column(String, nullable=False, unique=True)
     package_combo = Column(String, nullable=True)  # e.g. "Jet Plasma + Tesla Chair"
     
@@ -51,6 +53,8 @@ class CosgynPatientPlan(Base):
     __tablename__ = "cosgyn_patient_plans"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=True, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     patient_id = Column(String, index=True, nullable=False)
     treatment_id = Column(UUID(as_uuid=True), ForeignKey('cosgyn_treatments.id'), nullable=False)
     
@@ -70,6 +74,8 @@ class CosgynSession(Base):
     __tablename__ = "cosgyn_sessions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=True, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     plan_id = Column(UUID(as_uuid=True), ForeignKey('cosgyn_patient_plans.id'), nullable=False)
     session_number = Column(Integer, nullable=False)
     

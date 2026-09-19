@@ -13,8 +13,8 @@ class Ward(Base):
     department = Column(String(100), default="General IPD")
     base_charge_per_day = Column(Float, default=2000.0)
     total_beds = Column(Integer, default=10)
-    tenant_id = Column(UUID(as_uuid=True), nullable=True)
-    branch_id = Column(UUID(as_uuid=True), nullable=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     is_active = Column(Boolean, default=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -25,6 +25,8 @@ class Ward(Base):
 class Bed(Base):
     __tablename__ = "beds"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     ward_id = Column(UUID(as_uuid=True), ForeignKey("wards.id"), nullable=False)
     bed_number = Column(String(50), nullable=False)
     bed_type = Column(String(50), default="Standard")
@@ -42,6 +44,8 @@ class Bed(Base):
 class IPDAdmission(Base):
     __tablename__ = "ipd_admissions"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     admission_number = Column(String(50), nullable=False, unique=True)
     patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False)
     bed_id = Column(UUID(as_uuid=True), ForeignKey("beds.id"), nullable=False)
@@ -66,6 +70,8 @@ class IPDAdmission(Base):
 class NursingTask(Base):
     __tablename__ = "nursing_tasks"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     admission_id = Column(UUID(as_uuid=True), ForeignKey("ipd_admissions.id"), nullable=False)
     bed_id = Column(UUID(as_uuid=True), ForeignKey("beds.id"), nullable=False)
     task_type = Column(String(50), default="Vitals")

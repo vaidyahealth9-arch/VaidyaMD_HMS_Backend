@@ -9,6 +9,7 @@ class IndentCreate(BaseModel):
     urgency: str = "Routine"
     items: List[dict[str, Any]]
     notes: Optional[str] = None
+    branch_id: Optional[UUID] = None
 
 class IndentStatusUpdate(BaseModel):
     status: str
@@ -21,6 +22,7 @@ class PurchaseOrderCreate(BaseModel):
     expected_delivery_date: Optional[date] = None
     items: List[dict[str, Any]]
     notes: Optional[str] = None
+    branch_id: Optional[UUID] = None
 
 class GRNCreate(BaseModel):
     invoice_number: str
@@ -31,6 +33,7 @@ class GRNCreate(BaseModel):
     items: List[dict[str, Any]]
     ocr_raw_data: Optional[dict[str, Any]] = None
     verified_by_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
 
 class DispenseItem(BaseModel):
     item_code: str
@@ -41,3 +44,4 @@ class DispenseRequest(BaseModel):
     items: List[DispenseItem]
     doctor_id: Optional[Any] = None
     notes: Optional[str] = None
+    branch_id: Optional[UUID] = None

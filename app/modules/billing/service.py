@@ -46,16 +46,17 @@ class BillingService:
             catalog = [s for s in catalog if q_lower in s["name"].lower()]
         return catalog
 
-    async def generate_invoice_number(self) -> str:
+    async def generate_invoice_number(self, branch_code: Optional[str] = None) -> str:
+        code_prefix = f"INV-{branch_code.upper()}" if branch_code else "VMD-INV"
         result = await self.db.execute(select(func.count(Invoice.id)))
         count = result.scalar() or 0
         base_num = count + 1
         for attempt in range(100):
-            inv_num = f"VMD-INV-{(base_num + attempt):05d}"
+            inv_num = f"{code_prefix}-{(base_num + attempt):05d}"
             existing = await self.db.execute(select(Invoice.id).where(Invoice.invoice_number == inv_num))
             if not existing.scalar_one_or_none():
                 return inv_num
-        return f"VMD-INV-{base_num:05d}-{random.randint(100, 999)}"
+        return f"{code_prefix}-{base_num:05d}-{random.randint(100, 999)}"
 
     def _build_invoice_response(self, invoice: Invoice, patient: Optional[Patient] = None) -> InvoiceResponse:
         total = invoice.total_amount
@@ -82,6 +83,7 @@ class BillingService:
             upi_pay_mode=invoice.upi_pay_mode,
             notes=invoice.notes,
             tenant_id=invoice.tenant_id,
+            branch_id=invoice.branch_id,
             created_at=invoice.created_at,
         )
 
@@ -89,6 +91,14 @@ class BillingService:
         patient = await self.db.get(Patient, data.patient_id)
         if not patient:
             raise ValueError("Patient not found")
+
+        branch_id = getattr(data, "branch_id", None) or getattr(patient, "branch_id", None)
+        branch_code = None
+        if branch_id:
+            from app.core.models.branch import Branch
+            b = await self.db.get(Branch, branch_id)
+            if b and b.code:
+                branch_code = b.code
 
         subtotal = sum(item.total for item in data.items)
         total = subtotal - data.discount + data.tax
@@ -122,7 +132,7 @@ class BillingService:
             for item in data.items
         ]
 
-        inv_num = await self.generate_invoice_number()
+        inv_num = await self.generate_invoice_number(branch_code=branch_code)
 
         invoice = Invoice(
             invoice_number=inv_num,
@@ -142,6 +152,7 @@ class BillingService:
             notes=data.notes,
             created_by=user_creator,
             tenant_id=tenant_id,
+            branch_id=branch_id,
         )
         self.db.add(invoice)
         await self.db.flush()

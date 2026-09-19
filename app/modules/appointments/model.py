@@ -27,8 +27,9 @@ class Appointment(Base):
     notes = Column(Text)
     metadata_ = Column("metadata", JSONB, default=dict, comment="Extra metadata like OT booking info")
 
-    # Tenant FK
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id"), nullable=False)
+    # Tenant & Branch FK
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
