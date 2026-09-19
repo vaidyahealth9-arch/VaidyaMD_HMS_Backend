@@ -202,6 +202,20 @@ class AppointmentService:
         await self.db.flush()
         await self.db.refresh(appointment)
 
+        if data.status and data.status != old_status:
+            from app.core.events import event_bus, AppointmentStatusChangedEvent
+            event_bus.publish_background(
+                AppointmentStatusChangedEvent(
+                    appointment_id=str(appointment.id),
+                    patient_id=str(appointment.patient_id),
+                    doctor_id=str(appointment.doctor_id) if appointment.doctor_id else None,
+                    department=appointment.department,
+                    old_status=str(old_status) if old_status else None,
+                    new_status=str(data.status),
+                    tenant_id=str(appointment.tenant_id) if appointment.tenant_id else None,
+                )
+            )
+
         if data.status and data.status == AppointmentStatus.WAITING.value and old_status != AppointmentStatus.WAITING:
             patient = await self.db.get(Patient, appointment.patient_id)
             notification = Notification(

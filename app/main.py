@@ -70,6 +70,15 @@ async def lifespan(app: FastAPI):
     
     # Start background HL7 MLLP server on port 2575
     hl7_server_task = asyncio.create_task(start_hl7_mllp_server(host="0.0.0.0", port=2575))
+
+    # Register default event listeners for cross-domain telemetry
+    from app.core.events import event_bus, AppointmentStatusChangedEvent
+
+    async def on_appointment_status_changed(evt: AppointmentStatusChangedEvent):
+        logger.info(f"⚡ [EVENT BUS] Appointment {evt.appointment_id} status transitioned: {evt.old_status} -> {evt.new_status}")
+
+    event_bus.subscribe(AppointmentStatusChangedEvent, on_appointment_status_changed)
+
     yield
     print("🛑 VaidyaMD HMS shutting down...")
 
