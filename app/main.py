@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from app.config import settings
-from app.core.database import init_db, AsyncSessionLocal
+from app.core.database import AsyncSessionLocal
 from app.core.websocket import ws_manager, connected_user_roles
 
 # Structured logging configuration
@@ -64,9 +64,14 @@ from app.core.hl7_server import start_hl7_mllp_server
 async def lifespan(app: FastAPI):
     """Application lifespan — runs on startup and shutdown."""
     print("🚀 VaidyaMD HMS starting up...")
-    await init_db()
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        print("✅ Database connection verified (schema managed independently)")
+    except Exception as e:
+        print(f"⚠️ Database connection verification notice: {e}")
+
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    print("✅ Database schema verified and initialized non-destructively")
     
     # Start background HL7 MLLP server on port 2575
     hl7_server_task = asyncio.create_task(start_hl7_mllp_server(host="0.0.0.0", port=2575))
