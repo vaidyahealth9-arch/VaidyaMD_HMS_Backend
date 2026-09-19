@@ -10,7 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel
 from typing import Optional, Any
 from app.core.database import get_db
-from app.core.models import ClinicalRecord, Patient, Invoice
+from app.core.models import ClinicalRecord, Patient, Invoice, User
 from app.core.dependencies import get_current_user, require_active_plugin
 
 # Import fertility sub-routers
