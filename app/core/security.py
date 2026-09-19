@@ -13,7 +13,16 @@ from app.config import settings
 
 # --- PII Symmetric Encryption Setup ---
 def _get_fernet_cipher() -> Fernet:
-    """Derive a URL-safe base64-encoded 32-byte key for Fernet symmetric encryption from JWT secret."""
+    """Derive or load a URL-safe base64-encoded 32-byte key for Fernet symmetric encryption."""
+    if settings.PII_ENCRYPTION_KEY:
+        raw_key = settings.PII_ENCRYPTION_KEY.strip()
+        try:
+            return Fernet(raw_key.encode("utf-8"))
+        except Exception:
+            key_bytes = hashlib.sha256(raw_key.encode("utf-8")).digest()
+            urlsafe_key = base64.urlsafe_b64encode(key_bytes)
+            return Fernet(urlsafe_key)
+
     key_bytes = hashlib.sha256(settings.JWT_SECRET_KEY.encode()).digest()
     urlsafe_key = base64.urlsafe_b64encode(key_bytes)
     return Fernet(urlsafe_key)

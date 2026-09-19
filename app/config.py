@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = "vaidya_md_dev_secret_key_change_in_production"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_MINUTES: int = 480  # 8 hours
+    PII_ENCRYPTION_KEY: Optional[str] = None
 
     # File Storage
     UPLOAD_DIR: str = "./uploads"
@@ -105,5 +106,13 @@ if settings.ENVIRONMENT == "production":
             stacklevel=2,
         )
         settings.JWT_SECRET_KEY = generated_key
+    if not settings.PII_ENCRYPTION_KEY:
+        warnings.warn(
+            "SECURITY WARNING: PII_ENCRYPTION_KEY is not set in production! "
+            "Falling back to key derived from JWT_SECRET_KEY. "
+            "Set PII_ENCRYPTION_KEY in production environment variables to ensure independent encryption lifecycle.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
     # Enforce DEBUG=False in production
     settings.DEBUG = False
