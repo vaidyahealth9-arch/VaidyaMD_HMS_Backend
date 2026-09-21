@@ -49,7 +49,7 @@ Navigate to: [https://github.com/vaidyahealth9-arch/VaidyaMD_HMS_Backend/setting
 | **`GCP_CREDENTIALS`** | Content of `.secrets/dev-key.json` | Run in PowerShell to copy to clipboard:<br>`Get-Content 'c:\Users\ranju\OneDrive\Documents\GitHub\Halelabs(Vaidya)\limsAndPhr\VaidyaMD_HMS\new\.secrets\dev-key.json' -Raw \| Set-Clipboard` |
 | **`DATABASE_URL`** | `postgresql+asyncpg://vaidya_md_admin:vaidya_md_secret_2026@/vaidya_md_db?host=/cloudsql/vaidya-hms-dev:asia-south1:hms-db-dev` | Cloud SQL asyncpg connection for Dev |
 | **`JWT_SECRET_KEY`** | `vaidya_md_jwt_secret_dev_2026_super_secure_antigravity_token` | Dev JWT token signing secret |
-| **`CORS_ORIGINS`** | `["http://localhost:3000","https://hms-web-1062509658389.asia-south1.run.app","https://lrmtc5jt-3000.inc1.devtunnels.ms"]` | JSON array of permitted dev origins |
+| **`CORS_ORIGINS`** | `["http://localhost:3000","https://dev.vaidyamd.vaidyahealth.com","https://dev.md.vaidyahealth.com","https://dev-api.vaidyamd.vaidyahealth.com","https://dev-api.md.vaidyahealth.com","https://hms-web-1062509658389.asia-south1.run.app","https://lrmtc5jt-3000.inc1.devtunnels.ms"]` | JSON array of permitted dev origins (includes Cloud DNS `dev.vaidyamd.vaidyahealth.com`) |
 
 ---
 
@@ -60,7 +60,7 @@ Navigate to: [https://github.com/vaidyahealth9-arch/VaidyaMD_HMS_Backend/setting
 | **`GCP_CREDENTIALS`** | Content of `.secrets/prod-key.json` | Run in PowerShell to copy to clipboard:<br>`Get-Content 'c:\Users\ranju\OneDrive\Documents\GitHub\Halelabs(Vaidya)\limsAndPhr\VaidyaMD_HMS\new\.secrets\prod-key.json' -Raw \| Set-Clipboard` |
 | **`DATABASE_URL`** | `postgresql+asyncpg://vaidya_md_admin:vaidya_md_prod_secret_DuT9xNYMITQLcE2WSQUE3g@/vaidya_md_db?host=/cloudsql/vaidya-hms-prod:asia-south1:hms-db-prod` | Cloud SQL asyncpg connection for Prod |
 | **`JWT_SECRET_KEY`** | `SUP8Dvig537pdINog1_IrMIvtdcGaE_F8WwXzJdwyE9jz4imrsmIzgjORo0xO4W0` | Production high-entropy JWT secret |
-| **`CORS_ORIGINS`** | `["https://hms-web-242898387149.asia-south1.run.app","https://app.vaidyamd.com","https://vaidyamd.com"]` | JSON array of permitted prod origins |
+| **`CORS_ORIGINS`** | `["https://vaidyamd.vaidyahealth.com","https://md.vaidyahealth.com","https://api.vaidyamd.vaidyahealth.com","https://api.md.vaidyahealth.com","https://hms-web-242898387149.asia-south1.run.app","https://app.vaidyamd.com","https://vaidyamd.com"]` | JSON array of permitted prod origins (includes Cloud DNS `vaidyamd.vaidyahealth.com`) |
 
 ---
 
