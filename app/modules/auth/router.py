@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
@@ -6,7 +6,13 @@ from app.core.database import get_db
 from app.core.models import User
 from app.core.dependencies import get_current_user
 from app.modules.auth.schemas import (
-    LoginRequest, UserResponse, UserUpdateRequest, TokenResponse, RefreshTokenRequest
+    LoginRequest,
+    UserResponse,
+    UserUpdateRequest,
+    UserCreateRequest,
+    AdminUserUpdateRequest,
+    TokenResponse,
+    RefreshTokenRequest,
 )
 from app.modules.auth.service import AuthService
 
@@ -14,6 +20,14 @@ router = APIRouter(prefix="/auth", tags=["Authentication (Clean Architecture)"])
 
 def get_auth_service(db: AsyncSession = Depends(get_db)) -> AuthService:
     return AuthService(db)
+
+def check_admin(current_user: User):
+    role_str = (current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)).lower()
+    if role_str != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrative privileges required.",
+        )
 
 @router.post("/login", response_model=TokenResponse)
 @router.post("/login/", response_model=TokenResponse, include_in_schema=False)
@@ -64,10 +78,40 @@ async def get_my_profile(
 
 @router.get("/users", response_model=list[UserResponse])
 async def list_users(
+    include_inactive: bool = Query(False),
     current_user: User = Depends(get_current_user),
     service: AuthService = Depends(get_auth_service),
 ):
-    return await service.list_users(current_user.tenant_id)
+    return await service.list_users(current_user.tenant_id, include_inactive=include_inactive)
+
+@router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user(
+    request: UserCreateRequest,
+    current_user: User = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+):
+    check_admin(current_user)
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant context required")
+    try:
+        return await service.create_user(request, current_user.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/users/{user_id}", response_model=UserResponse)
+async def admin_update_user(
+    user_id: UUID,
+    request: AdminUserUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+):
+    check_admin(current_user)
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant context required")
+    try:
+        return await service.admin_update_user(user_id, request, current_user.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 @router.get("/doctors", response_model=list[UserResponse])
 async def list_doctors(
@@ -76,7 +120,7 @@ async def list_doctors(
 ):
     users = await service.list_users(current_user.tenant_id)
     return [u for u in users if u.is_doctor or u.role in ["doctor", "admin"]]
- 
+
 @router.patch("/users/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: UUID,

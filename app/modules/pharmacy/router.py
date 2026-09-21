@@ -166,3 +166,44 @@ async def commit_grn_to_stock(
         return await service.commit_grn_to_stock(grn_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+@router.get("/vendors")
+@router.get("/vendors/", include_in_schema=False)
+async def list_vendors(
+    current_user: User = Depends(get_current_user),
+    service: PharmacyService = Depends(get_pharmacy_service)
+):
+    return await service.list_vendors(tenant_id=current_user.tenant_id)
+
+@router.post("/vendors", status_code=201)
+@router.post("/vendors/", status_code=201, include_in_schema=False)
+async def create_vendor(
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+    service: PharmacyService = Depends(get_pharmacy_service)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required to create vendor")
+    return await service.create_vendor(payload, tenant_id=current_user.tenant_id)
+
+@router.put("/vendors/{vendor_id}")
+async def update_vendor(
+    vendor_id: UUID,
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+    service: PharmacyService = Depends(get_pharmacy_service)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required to update vendor")
+    return await service.update_vendor(vendor_id, payload, tenant_id=current_user.tenant_id)
+
+@router.delete("/vendors/{vendor_id}")
+async def delete_vendor(
+    vendor_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: PharmacyService = Depends(get_pharmacy_service)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required to delete vendor")
+    return await service.delete_vendor(vendor_id, tenant_id=current_user.tenant_id)
+

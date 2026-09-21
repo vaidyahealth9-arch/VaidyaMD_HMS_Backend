@@ -40,6 +40,8 @@ class IPDService:
         await self.db.flush()
         for i in range(1, payload.total_beds + 1):
             bed = Bed(
+                tenant_id=ward.tenant_id,
+                branch_id=ward.branch_id,
                 ward_id=ward.id,
                 bed_number=f"{payload.code}-{i:02d}",
                 daily_rate=payload.base_charge_per_day,
@@ -121,6 +123,72 @@ class IPDService:
                 "current_admission": adm_info,
             })
         return enriched
+
+    async def create_bed(self, payload: BedCreate, tenant_id: Optional[UUID] = None):
+        ward = await self.db.get(Ward, payload.ward_id)
+        if not ward:
+            raise ValueError("Ward not found")
+        if tenant_id and ward.tenant_id != tenant_id:
+            raise ValueError("Ward does not belong to this hospital tenant")
+
+        rate = payload.daily_rate if payload.daily_rate is not None else ward.base_charge_per_day
+        bed = Bed(
+            tenant_id=ward.tenant_id,
+            branch_id=ward.branch_id,
+            ward_id=ward.id,
+            bed_number=payload.bed_number,
+            bed_type=payload.bed_type or "Standard",
+            daily_rate=rate,
+            status=payload.status or "Vacant",
+        )
+        self.db.add(bed)
+        ward.total_beds = (ward.total_beds or 0) + 1
+        await self.db.flush()
+        await self.db.refresh(bed)
+        return {
+            "id": str(bed.id),
+            "ward_id": str(bed.ward_id),
+            "bed_number": bed.bed_number,
+            "bed_type": bed.bed_type,
+            "daily_rate": bed.daily_rate,
+            "status": bed.status,
+        }
+
+    async def update_bed(self, bed_id: UUID, payload: BedUpdate):
+        bed = await self.db.get(Bed, bed_id)
+        if not bed:
+            raise ValueError("Bed not found")
+        if payload.bed_number is not None:
+            bed.bed_number = payload.bed_number
+        if payload.bed_type is not None:
+            bed.bed_type = payload.bed_type
+        if payload.daily_rate is not None:
+            bed.daily_rate = payload.daily_rate
+        if payload.status is not None:
+            bed.status = payload.status
+        await self.db.flush()
+        await self.db.refresh(bed)
+        return {
+            "id": str(bed.id),
+            "ward_id": str(bed.ward_id),
+            "bed_number": bed.bed_number,
+            "bed_type": bed.bed_type,
+            "daily_rate": bed.daily_rate,
+            "status": bed.status,
+        }
+
+    async def delete_bed(self, bed_id: UUID):
+        bed = await self.db.get(Bed, bed_id)
+        if not bed:
+            raise ValueError("Bed not found")
+        if bed.status == "Occupied" or bed.current_admission_id:
+            raise ValueError("Cannot delete bed while occupied or attached to an active admission.")
+        ward = await self.db.get(Ward, bed.ward_id)
+        if ward and ward.total_beds and ward.total_beds > 0:
+            ward.total_beds -= 1
+        await self.db.delete(bed)
+        await self.db.flush()
+        return {"message": "Bed deleted successfully"}
 
     async def update_bed_status(self, bed_id: UUID, payload: BedStatusUpdate):
         bed = await self.db.get(Bed, bed_id)

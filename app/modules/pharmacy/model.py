@@ -94,3 +94,21 @@ class InventoryBatch(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PharmacyVendor(Base):
+    __tablename__ = "pharmacy_vendors"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
+    name = Column(String(150), nullable=False)
+    gst_number = Column(String(50), nullable=True)
+    contact_phone = Column(String(100), nullable=True)
+    contact_email = Column(String(100), nullable=True)
+    address = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+

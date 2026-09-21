@@ -14,12 +14,12 @@ from app.core.models.document import Document
 # Domain-Driven Core Modules
 from app.modules.patients.model import Patient, Gender, RegistrationType
 from app.modules.appointments.model import Appointment, AppointmentStatus
-from app.modules.billing.model import Invoice, TreatmentPackage, InvoiceStatus
+from app.modules.billing.model import Invoice, TreatmentPackage, PatientPackage, ServiceItem, InvoiceStatus
 from app.modules.notifications.model import Notification, NotificationType
 from app.modules.templates.model import ProtocolTemplate, ProtocolDrugRule, ClinicalTemplate
 from app.modules.wallet.model import PatientWallet, WalletTransaction, WalletTxType
 from app.modules.ipd.model import Ward, Bed, IPDAdmission, NursingTask
-from app.modules.pharmacy.model import PharmacyIndent, PurchaseOrder, GoodsReceivedNote, InventoryBatch
+from app.modules.pharmacy.model import PharmacyIndent, PurchaseOrder, GoodsReceivedNote, InventoryBatch, PharmacyVendor
 from app.modules.counseling.models import CounselingNote
 from app.modules.auth.models import RefreshToken
 
@@ -47,12 +47,12 @@ __all__ = [
     "Patient", "Gender", "RegistrationType",
     "ClinicalTemplate",
     "Appointment", "AppointmentStatus",
-    "Invoice", "TreatmentPackage", "InvoiceStatus",
+    "Invoice", "TreatmentPackage", "PatientPackage", "ServiceItem", "InvoiceStatus",
     "Notification", "NotificationType",
     "ProtocolTemplate", "ProtocolDrugRule",
     "PatientWallet", "WalletTransaction", "WalletTxType",
     "Ward", "Bed", "IPDAdmission", "NursingTask",
-    "PharmacyIndent", "PurchaseOrder", "GoodsReceivedNote", "InventoryBatch",
+    "PharmacyIndent", "PurchaseOrder", "GoodsReceivedNote", "InventoryBatch", "PharmacyVendor",
     "CounselingNote",
     "RefreshToken",
     # Fertility Plugin

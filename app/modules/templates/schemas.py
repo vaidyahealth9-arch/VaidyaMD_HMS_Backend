@@ -7,13 +7,13 @@ class ClinicalTemplateCreate(BaseModel):
     record_type: str
     title: str
     description: Optional[str] = None
-    schema_json: dict[str, Any]
+    schema_json: Any
     created_by: Optional[UUID] = None
 
 class ClinicalTemplateUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    schema_json: Optional[dict[str, Any]] = None
+    schema_json: Optional[Any] = None
     is_active: Optional[bool] = None
 
 class ClinicalTemplateResponse(BaseModel):
@@ -22,7 +22,7 @@ class ClinicalTemplateResponse(BaseModel):
     record_type: str
     title: str
     description: Optional[str]
-    schema_json: dict[str, Any]
+    schema_json: Any
     is_active: bool
 
     class Config:

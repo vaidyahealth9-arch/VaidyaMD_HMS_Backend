@@ -37,6 +37,8 @@ class User(Base):
 
     departments = Column(JSONB, default=list, comment="List of department IDs user belongs to")
     specialization = Column(String(255), comment="E.g. 'Reproductive Medicine', 'Clinical Embryology'")
+    qualification = Column(String(255), comment="E.g. 'MBBS, MS (OBG), DRM'")
+    reg_number = Column(String(100), comment="NMC or State Medical Council Registration Number")
     avatar_url = Column(String(500))
     phone = Column(String(20))
     is_active = Column(Boolean, default=True)

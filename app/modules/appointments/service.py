@@ -1,9 +1,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 from uuid import UUID
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
+import zoneinfo
 
+from app.config import settings
 from app.core.models import Hospital, User, Notification, NotificationType
 from app.modules.patients.model import Patient
 from app.modules.appointments.model import Appointment, AppointmentStatus
@@ -17,6 +19,12 @@ class AppointmentService:
 
     def _build_response(self, apt: Appointment, patient: Patient, doctor: User) -> AppointmentResponse:
         p_gender = patient.gender.value if (patient and hasattr(patient.gender, "value")) else (patient.gender if patient else None)
+        
+        # Ensure scheduled_at is serialized with UTC timezone awareness so client formats in local time accurately
+        sched_val = apt.scheduled_at
+        if sched_val and not sched_val.tzinfo:
+            sched_val = sched_val.replace(tzinfo=timezone.utc)
+
         return AppointmentResponse(
             id=apt.id,
             patient_id=apt.patient_id,
@@ -27,7 +35,7 @@ class AppointmentService:
             doctor_id=apt.doctor_id,
             doctor_name=doctor.name if doctor else None,
             department=apt.department,
-            scheduled_at=apt.scheduled_at,
+            scheduled_at=sched_val,
             status=apt.status.value if hasattr(apt.status, "value") else str(apt.status),
             visit_type=apt.visit_type,
             notes=apt.notes,
@@ -46,7 +54,15 @@ class AppointmentService:
         if not doctor:
             raise ValueError("Doctor not found")
 
-        sched_clean = data.scheduled_at.replace(tzinfo=None) if data.scheduled_at.tzinfo else data.scheduled_at
+        # Standardize scheduled_at to UTC naive datetime for storage
+        if data.scheduled_at:
+            if data.scheduled_at.tzinfo:
+                sched_clean = data.scheduled_at.astimezone(timezone.utc).replace(tzinfo=None)
+            else:
+                sched_clean = data.scheduled_at
+        else:
+            sched_clean = datetime.utcnow()
+
         if sched_clean < datetime.utcnow() - timedelta(minutes=5):
             raise InvalidAppointmentDateError("Appointment cannot be scheduled in the past.")
 
@@ -57,7 +73,14 @@ class AppointmentService:
             else:
                 dept = "General"
 
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        try:
+            tz = zoneinfo.ZoneInfo(getattr(settings, "TIMEZONE", "Asia/Kolkata"))
+        except Exception:
+            tz = zoneinfo.ZoneInfo("UTC")
+
+        today_start_local = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = today_start_local.astimezone(zoneinfo.ZoneInfo("UTC")).replace(tzinfo=None)
+
         existing_q = await self.db.execute(
             select(Appointment).where(
                 and_(
@@ -156,7 +179,18 @@ class AppointmentService:
         if filters.get("patient_id"):
             query = query.where(Appointment.patient_id == filters["patient_id"])
         if filters.get("date_filter"):
-            query = query.where(func.date(Appointment.scheduled_at) == filters["date_filter"])
+            target_date = filters["date_filter"]
+            try:
+                tz = zoneinfo.ZoneInfo(getattr(settings, "TIMEZONE", "Asia/Kolkata"))
+            except Exception:
+                tz = zoneinfo.ZoneInfo("UTC")
+
+            start_local = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=tz)
+            end_local = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59, 999999, tzinfo=tz)
+            start_utc = start_local.astimezone(zoneinfo.ZoneInfo("UTC")).replace(tzinfo=None)
+            end_utc = end_local.astimezone(zoneinfo.ZoneInfo("UTC")).replace(tzinfo=None)
+
+            query = query.where(Appointment.scheduled_at >= start_utc, Appointment.scheduled_at <= end_utc)
         if filters.get("status"):
             query = query.where(Appointment.status == filters["status"])
         if filters.get("department"):

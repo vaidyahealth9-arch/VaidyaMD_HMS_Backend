@@ -345,6 +345,40 @@ async def get_revenue_breakdown(
             if it.get("resolved_from_leakage_id"):
                 leakage_prevented += float(it.get("total") or it.get("unit_price") or 0.0)
 
+    # 8. Clinician Billing & Productivity Performance
+    clinician_query = (
+        select(
+            User.name,
+            User.role,
+            func.count(Invoice.id).label("inv_count"),
+            func.coalesce(func.sum(Invoice.total_amount), 0.0).label("billed"),
+            func.coalesce(func.sum(Invoice.paid_amount), 0.0).label("collected"),
+        )
+        .join(User, Invoice.created_by == User.id)
+    )
+    if start_time:
+        clinician_query = clinician_query.where(Invoice.created_at >= start_time)
+    if current_user.tenant_id:
+        clinician_query = clinician_query.where(Invoice.tenant_id == current_user.tenant_id)
+    if branch_id:
+        clinician_query = clinician_query.where(Invoice.branch_id == branch_id)
+    clinician_query = clinician_query.group_by(User.id, User.name, User.role)
+    clinician_res = await db.execute(clinician_query)
+    clinician_performance = []
+    for u_name, u_role, i_cnt, b_amt, c_amt in clinician_res.all():
+        b_val = float(b_amt or 0.0)
+        c_val = float(c_amt or 0.0)
+        role_str = u_role.value if hasattr(u_role, "value") else str(u_role)
+        clinician_performance.append({
+            "name": u_name,
+            "role": role_str.capitalize(),
+            "invoices_count": int(i_cnt or 0),
+            "total_billed": round(b_val, 2),
+            "total_collected": round(c_val, 2),
+            "collection_rate": round((c_val / b_val * 100), 1) if b_val > 0 else 0.0,
+        })
+    clinician_performance.sort(key=lambda x: x["total_billed"], reverse=True)
+
     return {
         "kpis": {
             "total_billed": round(total_billed, 2),
@@ -362,6 +396,7 @@ async def get_revenue_breakdown(
         "by_department": dept_revenue,
         "monthly_trend": monthly_trend,
         "referring_doctors": referring_doctors,
+        "by_clinician": clinician_performance,
         "timeframe": timeframe or "all",
         "branch_id": str(branch_id) if branch_id else "all",
     }
@@ -648,11 +683,19 @@ async def send_no_show_reminder(
     db.add(notif)
     await db.flush()
 
+    pat = await db.get(Patient, appointment.patient_id)
+    doc = await db.get(User, appointment.doctor_id) if appointment.doctor_id else None
+    pat_name = pat.name if pat else "Patient"
+    pat_phone = pat.phone if pat else ""
+    doc_name = doc.name if doc else "Doctor"
+
     return {
         "status": "success",
-        "message": "WhatsApp recall reminder logged (SMS/WhatsApp gateway integration pending).",
-        "wip": True,
+        "message": f"WhatsApp recall logged and queued for {pat_name} ({pat_phone or 'No phone'}).",
         "appointment_id": str(appointment.id),
+        "patient_name": pat_name,
+        "patient_phone": pat_phone,
+        "doctor_name": doc_name,
         "sent_at": now_str,
         "reminders_count": len(reminders),
     }
@@ -719,11 +762,11 @@ async def resolve_leakage(
     await db.refresh(invoice)
 
     return {
+        "status": "success",
         "message": f"Revenue leakage resolved! Generated invoice {inv_num} for ₹{payload.amount:,.2f}.",
         "invoice_id": str(invoice.id),
         "invoice_number": inv_num,
         "amount": payload.amount,
-        "wip": True,
     }
 
 

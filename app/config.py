@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: Optional[str] = None
     POSTGRES_HOST: Optional[str] = None
     POSTGRES_DB: Optional[str] = None
+    TIMEZONE: str = "Asia/Kolkata"
     
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://vaidya_md_admin:vaidya_md_secret_2026@localhost:5432/vaidya_md_db"

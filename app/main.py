@@ -50,6 +50,7 @@ from app.modules.lims.router import router as lims_router
 from app.core.routers.analytics import router as analytics_router
 from app.core.routers.documents import router as documents_router
 from app.modules.counseling.router import router as counseling_router
+from app.core.routers.admin_hub import router as admin_hub_router
 
 # Plugin routers
 from app.plugins.fertility.router import router as fertility_router
@@ -157,17 +158,24 @@ app.add_middleware(
 async def global_exception_handler(request: Request, exc: Exception):
     req_id = getattr(request.state, "request_id", "unknown")
     if isinstance(exc, HTTPException):
-        return JSONResponse(
+        resp = JSONResponse(
             status_code=exc.status_code,
             content={"detail": exc.detail, "request_id": req_id},
         )
-    # Log internal server errors
-    print(f"❌ [UNHANDLED ERROR] (Request ID: {req_id}): {exc}")
-    detail = str(exc) if settings.DEBUG else "An unexpected internal error occurred. Please contact hospital technical support."
-    return JSONResponse(
-        status_code=500,
-        content={"detail": detail, "request_id": req_id, "error_type": exc.__class__.__name__},
-    )
+    else:
+        print(f"❌ [UNHANDLED ERROR] (Request ID: {req_id}): {exc}")
+        detail = str(exc) if settings.DEBUG else "An unexpected internal error occurred. Please contact hospital technical support."
+        resp = JSONResponse(
+            status_code=500,
+            content={"detail": detail, "request_id": req_id, "error_type": exc.__class__.__name__},
+        )
+    origin = request.headers.get("origin")
+    if origin:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Methods"] = "*"
+        resp.headers["Access-Control-Allow-Headers"] = "*"
+    return resp
 
 
 # --- Core Routers ---
@@ -188,6 +196,7 @@ app.include_router(lims_router, prefix="/api/core")
 app.include_router(analytics_router, prefix="/api/core")
 app.include_router(documents_router, prefix="/api/core")
 app.include_router(counseling_router, prefix="/api/core")
+app.include_router(admin_hub_router, prefix="/api/core")
 
 # --- Plugin Routers ---
 app.include_router(fertility_router, prefix="/api/plugins")
@@ -195,8 +204,9 @@ app.include_router(opd_router, prefix="/api/plugins")
 app.include_router(cosgyn_router, prefix="/api/plugins")
 
 # --- Static Files (uploads) ---
-if os.path.exists(settings.UPLOAD_DIR):
-    app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+app.mount("/api/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="api_uploads")
 
 
 # --- WebSocket Endpoint ---

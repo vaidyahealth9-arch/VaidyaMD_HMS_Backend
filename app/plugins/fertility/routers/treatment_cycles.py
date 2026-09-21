@@ -6,7 +6,7 @@ import io
 import csv
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, or_
 from uuid import UUID
 from datetime import date, datetime
 from pydantic import BaseModel
@@ -20,40 +20,117 @@ from app.plugins.fertility.rules_engine import generate_medication_calendar
 router = APIRouter(prefix="/treatment-cycles", tags=["Fertility — Treatment Cycles"])
 
 
-# --- Fallback type list (used if DB is not yet seeded) ---
-_FALLBACK_CYCLE_TYPES = [
-    "* Embryo Transfer with PGS", "* Embryo Transfer", "Egg Donation", "Egg Freeze",
-    "Egg Sharing", "Fresh *ET", "Fresh Embryo Transfer", "FRESH EMBRYO TRANSFER ( SURROGATE )",
-    "Frozen *ET", "Frozen Embryo Transfer (FET)", "Frozen Embryo Transfer (FET) - Surrogate",
-    "Hospital Embryos", "ICSI", "ICSI (Surrogate)", "ICSI + FET", "ICSI + FRESH ET",
-    "ICSI + PGT-A", "ICSI + PGT-M", "ICSI Own and * Eggs", "ICSI Own and * Eggs & * Sperm",
-    "ICSI with * Eggs", "ICSI with * Eggs - Own &* Sperm", "ICSI with * Eggs + PGT",
-    "ICSI with * Eggs + PGT-M", "ICSI with * Eggs + TESA Sperm", "ICSI with * Sperm",
-    "ICSI with *Eggs & * Sperm", "ICSI WITH *EGGS (SURROGATE COMMISSIONING COUP",
-    "ICSI WITH *EGGS (SURROGATE)", "ICSI with Own & * Sperm", "ICSI with TESA and * Sperm",
-    "ICSI with TESA Sperm", "IUI - H", "IUI*", "IVF", "Natural Cycle", "None",
-    "Overseas Cycle", "Ovulation Induction", "PGT-A", "PGT-M",
-    "Surrogate Commissioning Couple", "Surrogate Commissioning Couple + PGT-A",
-    "Surrogate Commissioning Couple + PGT-M",
-]
-
-
 @router.get("/types", tags=["Fertility — Treatment Cycles"])
 async def list_cycle_types(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return all active treatment cycle types for dropdown population."""
-    result = await db.execute(
-        select(TreatmentCycleType)
-        .where(TreatmentCycleType.is_active == True)
-        .order_by(TreatmentCycleType.display_order, TreatmentCycleType.name)
-    )
+    """Return all active treatment cycle types for dropdown population directly from database."""
+    query = select(TreatmentCycleType).where(TreatmentCycleType.is_active == True)
+    if current_user and current_user.tenant_id:
+        query = query.where(
+            or_(
+                TreatmentCycleType.tenant_id == current_user.tenant_id,
+                TreatmentCycleType.tenant_id.is_(None),
+            )
+        )
+    query = query.order_by(TreatmentCycleType.display_order, TreatmentCycleType.name)
+    result = await db.execute(query)
     types = result.scalars().all()
-    if types:
-        return [{"id": str(t.id), "name": t.name} for t in types]
-    # Fallback: return hardcoded list if DB not yet seeded
-    return [{"id": str(i), "name": n} for i, n in enumerate(_FALLBACK_CYCLE_TYPES)]
+    return [
+        {
+            "id": str(t.id),
+            "name": t.name,
+            "category": t.category,
+            "display_order": t.display_order,
+            "is_active": t.is_active,
+        }
+        for t in types
+    ]
+
+
+class TreatmentCycleTypeCreate(BaseModel):
+    name: str
+    category: Optional[str] = "Stimulation"
+    display_order: Optional[int] = 0
+    is_active: Optional[bool] = True
+
+
+class TreatmentCycleTypeUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    display_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+@router.post("/types", status_code=201, tags=["Fertility — Treatment Cycles"])
+async def create_cycle_type(
+    payload: TreatmentCycleTypeCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cycle_type = TreatmentCycleType(
+        tenant_id=current_user.tenant_id,
+        name=payload.name,
+        category=payload.category,
+        display_order=payload.display_order or 0,
+        is_active=payload.is_active if payload.is_active is not None else True,
+    )
+    db.add(cycle_type)
+    await db.commit()
+    await db.refresh(cycle_type)
+    return {
+        "id": str(cycle_type.id),
+        "name": cycle_type.name,
+        "category": cycle_type.category,
+        "display_order": cycle_type.display_order,
+        "is_active": cycle_type.is_active,
+    }
+
+
+@router.put("/types/{type_id}", tags=["Fertility — Treatment Cycles"])
+async def update_cycle_type(
+    type_id: UUID,
+    payload: TreatmentCycleTypeUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cycle_type = await db.get(TreatmentCycleType, type_id)
+    if not cycle_type or (cycle_type.tenant_id and cycle_type.tenant_id != current_user.tenant_id):
+        raise HTTPException(status_code=404, detail="Cycle type not found")
+    if payload.name is not None:
+        cycle_type.name = payload.name
+    if payload.category is not None:
+        cycle_type.category = payload.category
+    if payload.display_order is not None:
+        cycle_type.display_order = payload.display_order
+    if payload.is_active is not None:
+        cycle_type.is_active = payload.is_active
+    await db.commit()
+    await db.refresh(cycle_type)
+    return {
+        "id": str(cycle_type.id),
+        "name": cycle_type.name,
+        "category": cycle_type.category,
+        "display_order": cycle_type.display_order,
+        "is_active": cycle_type.is_active,
+    }
+
+
+@router.delete("/types/{type_id}", tags=["Fertility — Treatment Cycles"])
+async def delete_cycle_type(
+    type_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cycle_type = await db.get(TreatmentCycleType, type_id)
+    if not cycle_type or (cycle_type.tenant_id and cycle_type.tenant_id != current_user.tenant_id):
+        raise HTTPException(status_code=404, detail="Cycle type not found")
+    cycle_type.is_active = False
+    await db.commit()
+    return {"status": "success", "message": "Cycle type deleted successfully"}
+
+
 
 
 # --- Pydantic Schemas ---

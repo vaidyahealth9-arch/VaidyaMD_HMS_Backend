@@ -1,23 +1,79 @@
-name: Deploy Backend to Cloud Run
+name: Deploy Backend to GCP Cloud Run
 
 on:
-  push:
-    branches:
-      - main
-
-env:
-  PROJECT_ID: vaidya-hms-dev
-  REGION: asia-south1
-  REPO_NAME: hms-repo
-  SERVICE_NAME: hms-backend
-  DB_INSTANCE: vaidya-hms-dev:asia-south1:hms-db-dev
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: 'dev'
+      confirm_prod:
+        description: 'Type DEPLOY-PROD to confirm production release (ignored for dev)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
-  deploy:
+  validate:
+    name: Validate Guardrails & Branch Safety
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Enforce Branch Safety
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          REF="${{ github.ref }}"
+          echo "Target Environment: $ENV"
+          echo "Current Branch / Ref: $REF"
+          
+          if [ "$ENV" = "prod" ]; then
+            if [ "$REF" != "refs/heads/main" ]; then
+              echo "::error::Production deployments are strictly restricted to the 'main' branch! Current ref is $REF."
+              exit 1
+            fi
+            if [ "${{ github.event.inputs.confirm_prod }}" != "DEPLOY-PROD" ]; then
+              echo "::error::Production deployment confirmation failed. Please type 'DEPLOY-PROD' in confirm_prod."
+              exit 1
+            fi
+            echo "✅ Production guardrails verified."
+          else
+            echo "✅ Development environment approved."
+          fi
+
+  deploy:
+    name: Build & Deploy to Cloud Run
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout Source Code
         uses: actions/checkout@v4
+
+      - name: Configure Target Environment
+        id: config
+        run: |
+          TARGET_ENV="${{ github.event.inputs.environment }}"
+          if [ "$TARGET_ENV" = "prod" ]; then
+            echo "PROJECT_ID=vaidya-hms-prod" >> $GITHUB_ENV
+            echo "DB_INSTANCE=vaidya-hms-prod:asia-south1:hms-db-prod" >> $GITHUB_ENV
+            echo "BUCKET_NAME=vaidya-hms-prod-uploads" >> $GITHUB_ENV
+            echo "MIN_INSTANCES=1" >> $GITHUB_ENV
+            echo "MAX_INSTANCES=10" >> $GITHUB_ENV
+            echo "MEMORY=1Gi" >> $GITHUB_ENV
+          else
+            echo "PROJECT_ID=vaidya-hms-dev" >> $GITHUB_ENV
+            echo "DB_INSTANCE=vaidya-hms-dev:asia-south1:hms-db-dev" >> $GITHUB_ENV
+            echo "BUCKET_NAME=vaidya-hms-dev-uploads" >> $GITHUB_ENV
+            echo "MIN_INSTANCES=0" >> $GITHUB_ENV
+            echo "MAX_INSTANCES=3" >> $GITHUB_ENV
+            echo "MEMORY=512Mi" >> $GITHUB_ENV
+          fi
+          echo "REGION=asia-south1" >> $GITHUB_ENV
+          echo "SERVICE_NAME=hms-backend" >> $GITHUB_ENV
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -26,26 +82,68 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
 
-      - name: Configure Docker
-        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
-
-      - name: Build and Push Docker image
+      - name: Configure Docker for Artifact Registry
         run: |
-          IMAGE_NAME=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
-          docker build -t $IMAGE_NAME .
-          docker push $IMAGE_NAME
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and Push Docker Image
+        run: |
+          GIT_SHA=$(git rev-parse --short HEAD)
+          IMAGE_BASE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/hms-repo/${{ env.SERVICE_NAME }}"
+          docker build \
+            -t ${IMAGE_BASE}:${GIT_SHA} \
+            -t ${IMAGE_BASE}:latest \
+            .
+          docker push ${IMAGE_BASE}:${GIT_SHA}
+          docker push ${IMAGE_BASE}:latest
+          echo "IMAGE_DEPLOY=${IMAGE_BASE}:${GIT_SHA}" >> $GITHUB_ENV
+
+      - name: Generate Cloud Run Environment Config
+        run: |
+          cat << 'EOF' > cloudrun_env.yaml
+          ENVIRONMENT: "${{ github.event.inputs.environment }}"
+          DEBUG: "False"
+          UPLOAD_DIR: "/app/uploads"
+          GCS_BUCKET_NAME: "${{ env.BUCKET_NAME }}"
+          DB_POOL_SIZE: "5"
+          DB_MAX_OVERFLOW: "5"
+          DATABASE_URL: "${{ secrets.DATABASE_URL }}"
+          JWT_SECRET_KEY: "${{ secrets.JWT_SECRET_KEY }}"
+          CORS_ORIGINS: '${{ secrets.CORS_ORIGINS }}'
+          EOF
 
       - name: Deploy to Cloud Run
         run: |
-          IMAGE_NAME=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
           gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image $IMAGE_NAME \
+            --image ${{ env.IMAGE_DEPLOY }} \
             --region ${{ env.REGION }} \
             --project ${{ env.PROJECT_ID }} \
+            --platform managed \
             --allow-unauthenticated \
+            --port 8000 \
+            --cpu 1 \
+            --memory ${{ env.MEMORY }} \
+            --min-instances ${{ env.MIN_INSTANCES }} \
+            --max-instances ${{ env.MAX_INSTANCES }} \
             --add-cloudsql-instances ${{ env.DB_INSTANCE }} \
-            --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }},JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }},DEBUG=False,ALLOWED_ORIGINS=*" \
-            --set-env-vars="DB_POOL_SIZE=5,DB_MAX_OVERFLOW=5" \
-            --memory=512Mi \
-            --cpu=1
+            --env-vars-file cloudrun_env.yaml \
+            --timeout 300
+
+      - name: Securely Remove Environment File
+        if: always()
+        run: |
+          rm -f cloudrun_env.yaml
+
+      - name: Verify Backend Health
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --project ${{ env.PROJECT_ID }} \
+            --format 'value(status.url)')
+          echo "Deployed service URL: $SERVICE_URL"
+          echo "Checking health endpoint $SERVICE_URL/api/health..."
+          curl -f -m 30 "$SERVICE_URL/api/health" || (echo "Healthcheck probe failed!" && exit 1)
+          echo "✅ Backend Cloud Run service is active and healthy!"

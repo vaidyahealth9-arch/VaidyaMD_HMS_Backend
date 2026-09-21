@@ -63,3 +63,40 @@ class TreatmentPackage(Base):
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ServiceItem(Base):
+    __tablename__ = "service_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
+    code = Column(String(50), nullable=False, index=True, comment="e.g. OPD-001, USG-002, LAB-003")
+    name = Column(String(255), nullable=False)
+    category = Column(String(100), nullable=False, default="OP", comment="Consultation, Scan, Lab, Procedure, Nursing, Daycare")
+    base_price = Column(Numeric(12, 2), nullable=False, default=0.00)
+    hsn_sac = Column(String(50), nullable=True, comment="HSN or SAC statutory tax code")
+    gst_rate = Column(Numeric(5, 2), default=0.00, comment="Tax rate percentage e.g. 0.00, 5.00, 18.00")
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PatientPackage(Base):
+    __tablename__ = "patient_packages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    package_id = Column(UUID(as_uuid=True), ForeignKey("treatment_packages.id", ondelete="SET NULL"), nullable=True)
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)
+    package_name = Column(String(255), nullable=False)
+    total_price = Column(Numeric(12, 2), nullable=False, default=0.00)
+    status = Column(String(50), nullable=False, default="active")  # 'active', 'completed', 'cancelled'
+    items = Column(JSONB, nullable=False, default=list)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    patient = relationship("Patient", lazy="selectin")
+    package = relationship("TreatmentPackage", lazy="selectin")
+    invoice = relationship("Invoice", lazy="selectin")
+

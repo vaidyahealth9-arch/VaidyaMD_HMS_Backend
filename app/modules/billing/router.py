@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from uuid import UUID
@@ -6,7 +6,18 @@ from uuid import UUID
 from app.core.database import get_db
 from app.core.models import User
 from app.core.dependencies import get_current_user
-from app.modules.billing.schemas import InvoiceCreate, InvoiceResponse, PaymentRequest, TreatmentPackageSchema
+from app.modules.billing.schemas import (
+    InvoiceCreate,
+    InvoiceResponse,
+    PaymentRequest,
+    TreatmentPackageSchema,
+    TreatmentPackageUpdate,
+    ServiceItemCreate,
+    ServiceItemUpdate,
+    PatientPackageAssignRequest,
+    PatientPackageConsumeRequest,
+    PatientPackageResponse,
+)
 from app.modules.billing.service import BillingService
 from app.modules.billing.exceptions import InvoiceNotFoundError, InsufficientWalletBalanceError
 
@@ -15,6 +26,11 @@ router = APIRouter(prefix="/billing", tags=["Billing (Clean Architecture)"])
 def get_billing_service(db: AsyncSession = Depends(get_db)) -> BillingService:
     return BillingService(db)
 
+def check_admin(user: User):
+    role = (user.role.value if hasattr(user.role, "value") else str(user.role)).lower()
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super-Admin privileges required")
+
 @router.get("/service-catalog")
 async def get_service_catalog(
     service_type: str = None,
@@ -22,7 +38,72 @@ async def get_service_catalog(
     current_user: User = Depends(get_current_user),
     service: BillingService = Depends(get_billing_service),
 ):
-    return service.get_service_catalog(service_type, q)
+    return await service.get_service_catalog(
+        tenant_id=current_user.tenant_id,
+        branch_id=current_user.branch_id,
+        service_type=service_type,
+        q=q,
+    )
+
+@router.post("/service-catalog", status_code=status.HTTP_201_CREATED)
+async def create_service_item(
+    data: ServiceItemCreate,
+    current_user: User = Depends(get_current_user),
+    service: BillingService = Depends(get_billing_service),
+):
+    check_admin(current_user)
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant context required")
+    item = await service.create_service_item(data, current_user.tenant_id)
+    return {
+        "id": str(item.id),
+        "code": item.code,
+        "name": item.name,
+        "category": item.category,
+        "base_price": float(item.base_price),
+        "hsn_sac": item.hsn_sac,
+        "gst_rate": float(item.gst_rate) if item.gst_rate is not None else 0.0,
+        "is_active": item.is_active,
+    }
+
+@router.put("/service-catalog/{item_id}")
+async def update_service_item(
+    item_id: UUID,
+    data: ServiceItemUpdate,
+    current_user: User = Depends(get_current_user),
+    service: BillingService = Depends(get_billing_service),
+):
+    check_admin(current_user)
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant context required")
+    try:
+        item = await service.update_service_item(item_id, data, current_user.tenant_id)
+        return {
+            "id": str(item.id),
+            "code": item.code,
+            "name": item.name,
+            "category": item.category,
+            "base_price": float(item.base_price),
+            "hsn_sac": item.hsn_sac,
+            "gst_rate": float(item.gst_rate) if item.gst_rate is not None else 0.0,
+            "is_active": item.is_active,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.delete("/service-catalog/{item_id}")
+async def delete_service_item(
+    item_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: BillingService = Depends(get_billing_service),
+):
+    check_admin(current_user)
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant context required")
+    success = await service.delete_service_item(item_id, current_user.tenant_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Service item not found")
+    return {"status": "success", "message": "Service item deactivated successfully"}
 
 @router.post("/invoices", response_model=InvoiceResponse, status_code=201)
 async def create_invoice(
@@ -35,8 +116,6 @@ async def create_invoice(
             raise HTTPException(status_code=403, detail="User is not associated with an active hospital tenant")
         tenant_id = current_user.tenant_id
 
-        
-        # Override created_by with current user if not provided
         if not data.created_by:
             data.created_by = current_user.id
             
@@ -101,7 +180,82 @@ async def create_package(
     current_user: User = Depends(get_current_user),
     service: BillingService = Depends(get_billing_service),
 ):
+    check_admin(current_user)
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Tenant context required to create packages")
     return await service.create_package(data, current_user.tenant_id)
+
+@router.put("/packages/{package_id}", response_model=TreatmentPackageSchema)
+async def update_package(
+    package_id: UUID,
+    data: TreatmentPackageUpdate,
+    current_user: User = Depends(get_current_user),
+    service: BillingService = Depends(get_billing_service),
+):
+    check_admin(current_user)
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    try:
+        return await service.update_package(package_id, data, current_user.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.delete("/packages/{package_id}")
+async def delete_package(
+    package_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: BillingService = Depends(get_billing_service),
+):
+    check_admin(current_user)
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    success = await service.delete_package(package_id, current_user.tenant_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Treatment package not found")
+    return {"status": "success", "message": "Treatment package deactivated successfully"}
+
+
+# ---------------------------------------------------------
+# Patient Package Allocations & Service Quota Deductions
+# ---------------------------------------------------------
+
+@router.post("/patient-packages/assign", response_model=PatientPackageResponse, status_code=201)
+@router.post("/patient-packages", response_model=PatientPackageResponse, status_code=201, include_in_schema=False)
+async def assign_patient_package(
+    data: PatientPackageAssignRequest,
+    current_user: User = Depends(get_current_user),
+    service: BillingService = Depends(get_billing_service),
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    try:
+        return await service.assign_patient_package(data, current_user.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/patient-packages/patient/{patient_id}", response_model=list[PatientPackageResponse])
+async def get_patient_packages(
+    patient_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: BillingService = Depends(get_billing_service),
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    return await service.get_patient_packages(patient_id, current_user.tenant_id)
+
+
+@router.post("/patient-packages/{package_id}/consume", response_model=PatientPackageResponse)
+async def consume_package_service(
+    package_id: UUID,
+    data: PatientPackageConsumeRequest,
+    current_user: User = Depends(get_current_user),
+    service: BillingService = Depends(get_billing_service),
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    try:
+        return await service.consume_package_service(package_id, data, current_user.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 

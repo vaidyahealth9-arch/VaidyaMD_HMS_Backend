@@ -75,6 +75,42 @@ async def list_beds(
 ):
     return await service.list_beds(ward_id=ward_id, status=status, tenant_id=current_user.tenant_id)
 
+@router.post("/beds", status_code=status.HTTP_201_CREATED)
+@router.post("/beds/", status_code=status.HTTP_201_CREATED)
+async def create_bed(
+    payload: BedCreate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.create_bed(payload, tenant_id=current_user.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/beds/{bed_id}")
+@router.patch("/beds/{bed_id}")
+async def update_bed(
+    bed_id: UUID,
+    payload: BedUpdate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.update_bed(bed_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.delete("/beds/{bed_id}")
+async def delete_bed(
+    bed_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.delete_bed(bed_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.patch("/beds/{bed_id}/status")
 async def update_bed_status(
     bed_id: UUID,

@@ -6,7 +6,7 @@ Encapsulates Treatment Cycles, Embryology, Dual Witnessing, Cryobank, and Cycle 
 import uuid
 import enum
 from datetime import datetime, date
-from sqlalchemy import Column, String, DateTime, Date, Integer, Enum, ForeignKey, Text, Boolean
+from sqlalchemy import Column, String, DateTime, Date, Integer, Enum, ForeignKey, Text, Boolean, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -26,14 +26,19 @@ class TreatmentCycleStatus(str, enum.Enum):
 
 class TreatmentCycleType(Base):
     __tablename__ = "treatment_cycle_types"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_treatment_cycle_type_tenant_name"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=True, index=True)
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
-    name = Column(String(150), nullable=False, unique=True, comment="E.g. ICSI + PGT-A, IUI*, Surrogate Commissioning Couple")
+    name = Column(String(150), nullable=False, index=True, comment="E.g. ICSI + PGT-A, IUI*, Surrogate Commissioning Couple")
+    category = Column(String(100), nullable=True, comment="Stimulation, FET, IUI, Preservation, Third-Party, Diagnostics")
     display_order = Column(Integer, default=0, comment="Sort order for UI display")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
 
 
 class TreatmentCycle(Base):
