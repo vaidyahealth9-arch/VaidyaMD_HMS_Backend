@@ -178,30 +178,32 @@ async def global_exception_handler(request: Request, exc: Exception):
     return resp
 
 
-# --- Core Routers ---
-app.include_router(auth_router, prefix="/api/core")
-app.include_router(patients_router, prefix="/api/core")
-app.include_router(appointments_router, prefix="/api/core")
-app.include_router(billing_router, prefix="/api/core")
-app.include_router(wallet_router, prefix="/api/core")
-app.include_router(notifications_router, prefix="/api/core")
-app.include_router(templates_router, prefix="/api/core")
-app.include_router(clinical_records_router, prefix="/api/core")
-app.include_router(ai_scribe_router, prefix="/api/core")
-app.include_router(permission_profiles_router, prefix="/api/core")
-app.include_router(branches_router, prefix="/api/core")
-app.include_router(ipd_router, prefix="/api/core")
-app.include_router(pharmacy_router, prefix="/api/core")
-app.include_router(lims_router, prefix="/api/core")
-app.include_router(analytics_router, prefix="/api/core")
-app.include_router(documents_router, prefix="/api/core")
-app.include_router(counseling_router, prefix="/api/core")
-app.include_router(admin_hub_router, prefix="/api/core")
+# --- Core Routers (Mounted under both /api/core and /core) ---
+for prefix in ["/api/core", "/core"]:
+    app.include_router(auth_router, prefix=prefix)
+    app.include_router(patients_router, prefix=prefix)
+    app.include_router(appointments_router, prefix=prefix)
+    app.include_router(billing_router, prefix=prefix)
+    app.include_router(wallet_router, prefix=prefix)
+    app.include_router(notifications_router, prefix=prefix)
+    app.include_router(templates_router, prefix=prefix)
+    app.include_router(clinical_records_router, prefix=prefix)
+    app.include_router(ai_scribe_router, prefix=prefix)
+    app.include_router(permission_profiles_router, prefix=prefix)
+    app.include_router(branches_router, prefix=prefix)
+    app.include_router(ipd_router, prefix=prefix)
+    app.include_router(pharmacy_router, prefix=prefix)
+    app.include_router(lims_router, prefix=prefix)
+    app.include_router(analytics_router, prefix=prefix)
+    app.include_router(documents_router, prefix=prefix)
+    app.include_router(counseling_router, prefix=prefix)
+    app.include_router(admin_hub_router, prefix=prefix)
 
-# --- Plugin Routers ---
-app.include_router(fertility_router, prefix="/api/plugins")
-app.include_router(opd_router, prefix="/api/plugins")
-app.include_router(cosgyn_router, prefix="/api/plugins")
+# --- Plugin Routers (Mounted under both /api/plugins and /plugins) ---
+for prefix in ["/api/plugins", "/plugins"]:
+    app.include_router(fertility_router, prefix=prefix)
+    app.include_router(opd_router, prefix=prefix)
+    app.include_router(cosgyn_router, prefix=prefix)
 
 # --- Static Files (uploads) ---
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -211,6 +213,7 @@ app.mount("/api/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="api_
 
 # --- WebSocket Endpoint ---
 @app.websocket("/ws/notifications/{user_id}")
+@app.websocket("/api/ws/notifications/{user_id}")
 async def websocket_notifications(websocket: WebSocket, user_id: str):
     """
     Real-time notification channel per user.
@@ -252,6 +255,7 @@ async def websocket_notifications(websocket: WebSocket, user_id: str):
 
 # --- Production Health Check ---
 @app.get("/api/health")
+@app.get("/health")
 async def health_check():
     """Health check validating active database connectivity and websocket status."""
     db_status = "healthy"
