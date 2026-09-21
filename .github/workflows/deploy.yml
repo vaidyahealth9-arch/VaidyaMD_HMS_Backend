@@ -56,24 +56,24 @@ jobs:
       - name: Configure Target Environment
         id: config
         run: |
-          TARGET_ENV="${{ github.event.inputs.environment }}"
+          TARGET_ENV=$(echo "${{ github.event.inputs.environment }}" | tr -d '\r')
           if [ "$TARGET_ENV" = "prod" ]; then
-            echo "PROJECT_ID=vaidya-hms-prod" >> $GITHUB_ENV
-            echo "DB_INSTANCE=vaidya-hms-prod:asia-south1:hms-db-prod" >> $GITHUB_ENV
-            echo "BUCKET_NAME=vaidya-hms-prod-uploads" >> $GITHUB_ENV
-            echo "MIN_INSTANCES=1" >> $GITHUB_ENV
-            echo "MAX_INSTANCES=10" >> $GITHUB_ENV
-            echo "MEMORY=1Gi" >> $GITHUB_ENV
+            printf "PROJECT_ID=vaidya-hms-prod\n" >> $GITHUB_ENV
+            printf "DB_INSTANCE=vaidya-hms-prod:asia-south1:hms-db-prod\n" >> $GITHUB_ENV
+            printf "BUCKET_NAME=vaidya-hms-prod-uploads\n" >> $GITHUB_ENV
+            printf "MIN_INSTANCES=1\n" >> $GITHUB_ENV
+            printf "MAX_INSTANCES=10\n" >> $GITHUB_ENV
+            printf "MEMORY=1Gi\n" >> $GITHUB_ENV
           else
-            echo "PROJECT_ID=vaidya-hms-dev" >> $GITHUB_ENV
-            echo "DB_INSTANCE=vaidya-hms-dev:asia-south1:hms-db-dev" >> $GITHUB_ENV
-            echo "BUCKET_NAME=vaidya-hms-dev-uploads" >> $GITHUB_ENV
-            echo "MIN_INSTANCES=0" >> $GITHUB_ENV
-            echo "MAX_INSTANCES=3" >> $GITHUB_ENV
-            echo "MEMORY=512Mi" >> $GITHUB_ENV
+            printf "PROJECT_ID=vaidya-hms-dev\n" >> $GITHUB_ENV
+            printf "DB_INSTANCE=vaidya-hms-dev:asia-south1:hms-db-dev\n" >> $GITHUB_ENV
+            printf "BUCKET_NAME=vaidya-hms-dev-uploads\n" >> $GITHUB_ENV
+            printf "MIN_INSTANCES=0\n" >> $GITHUB_ENV
+            printf "MAX_INSTANCES=3\n" >> $GITHUB_ENV
+            printf "MEMORY=512Mi\n" >> $GITHUB_ENV
           fi
-          echo "REGION=asia-south1" >> $GITHUB_ENV
-          echo "SERVICE_NAME=hms-backend" >> $GITHUB_ENV
+          printf "REGION=asia-south1\n" >> $GITHUB_ENV
+          printf "SERVICE_NAME=hms-backend\n" >> $GITHUB_ENV
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
