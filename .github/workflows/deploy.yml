@@ -101,20 +101,6 @@ jobs:
           docker push ${IMAGE_BASE}:latest
           echo "IMAGE_DEPLOY=${IMAGE_BASE}:${GIT_SHA}" >> $GITHUB_ENV
 
-      - name: Generate Cloud Run Environment Config
-        run: |
-          cat << 'EOF' > cloudrun_env.yaml
-          ENVIRONMENT: "${{ github.event.inputs.environment }}"
-          DEBUG: "False"
-          UPLOAD_DIR: "/app/uploads"
-          GCS_BUCKET_NAME: "${{ env.BUCKET_NAME }}"
-          DB_POOL_SIZE: "5"
-          DB_MAX_OVERFLOW: "5"
-          DATABASE_URL: "${{ secrets.DATABASE_URL }}"
-          JWT_SECRET_KEY: "${{ secrets.JWT_SECRET_KEY }}"
-          CORS_ORIGINS: '${{ secrets.CORS_ORIGINS }}'
-          EOF
-
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
@@ -129,13 +115,9 @@ jobs:
             --min-instances ${{ env.MIN_INSTANCES }} \
             --max-instances ${{ env.MAX_INSTANCES }} \
             --add-cloudsql-instances ${{ env.DB_INSTANCE }} \
-            --env-vars-file cloudrun_env.yaml \
+            --set-env-vars "ENVIRONMENT=${{ github.event.inputs.environment }},DEBUG=False,UPLOAD_DIR=/app/uploads,DB_POOL_SIZE=5,DB_MAX_OVERFLOW=5" \
+            --set-secrets "DATABASE_URL=hms-database-url:latest,JWT_SECRET_KEY=hms-jwt-secret:latest,CORS_ORIGINS=hms-cors-origins:latest,GCS_BUCKET_NAME=hms-gcs-bucket:latest" \
             --timeout 300
-
-      - name: Securely Remove Environment File
-        if: always()
-        run: |
-          rm -f cloudrun_env.yaml
 
       - name: Verify Backend Health
         run: |

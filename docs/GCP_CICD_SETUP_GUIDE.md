@@ -1,8 +1,8 @@
 # GCP Cloud Run CI/CD Deployment & Secrets Setup Guide
 
 > [!NOTE]
-> All GCP infrastructure, Artifact Registry repositories, service accounts, IAM bindings, GCS buckets, and service account keys have been **automatically generated and configured**. 
-> The **ONLY remaining step** is adding the secrets listed below into your GitHub repository settings.
+> All GCP infrastructure, Artifact Registry repositories, service accounts, IAM bindings, GCS buckets, Cloud DNS records, and **GCP Secret Manager secrets** have been **automatically generated and configured**. 
+> Thanks to our **GCP Secret Manager integration**, your deployment is now **100% developer-friendly**: you only need to add **ONE secret (`GCP_CREDENTIALS`)** to GitHub!
 
 ---
 
@@ -13,18 +13,38 @@
 | **GCP Project ID** | `vaidya-hms-dev` | `vaidya-hms-prod` | Active & Verified |
 | **Project Number** | `1062509658389` | `242898387149` | Active & Verified |
 | **Region** | `asia-south1` (Mumbai) | `asia-south1` (Mumbai) | Active & Verified |
-| **Cloud Run Backend** | `hms-backend` | `hms-backend` | Configured |
-| **Cloud Run Frontend** | `hms-web` | `hms-web` | Configured |
+| **Cloud Run Backend** | `hms-backend` | `hms-backend` | Configured with Secret Manager |
+| **Cloud Run Frontend** | `hms-web` | `hms-web` | Configured with Custom Domains |
 | **Artifact Registry** | `asia-south1-docker.pkg.dev/vaidya-hms-dev/hms-repo` | `asia-south1-docker.pkg.dev/vaidya-hms-prod/hms-repo` | Created & Verified |
 | **Cloud SQL Instance** | `vaidya-hms-dev:asia-south1:hms-db-dev` | `vaidya-hms-prod:asia-south1:hms-db-prod` | Created & Verified |
-| **Cloud SQL DB / User** | `vaidya_md_db` / `vaidya_md_admin` | `vaidya_md_db` / `vaidya_md_admin` | Created & Verified |
 | **GCS Uploads Bucket** | `gs://vaidya-hms-dev-uploads` | `gs://vaidya-hms-prod-uploads` | Configured with `roles/storage.objectAdmin` |
 | **Service Account** | `github-actions@vaidya-hms-dev.iam.gserviceaccount.com` | `github-actions@vaidya-hms-prod.iam.gserviceaccount.com` | Key Generated in `.secrets/` |
 | **Database Migrations** | **Manual only** | **Manual only** | Excluded from CI/CD pipeline |
 
 ---
 
-## 2. Step 1: Create GitHub Environments
+## 2. GCP Secret Manager Integration (Developer Friendly)
+
+All runtime backend configuration is safely stored in **Google Cloud Secret Manager** and automatically mounted into Cloud Run via `--set-secrets`. 
+
+> [!TIP]
+> **Why is this developer-friendly?**
+> 1. **Zero Secret Fatigue**: You don't need to copy/paste 8 different secrets into GitHub settings.
+> 2. **Instant Rotation**: If you rotate the database password or add a new domain to `CORS_ORIGINS`, simply add a new version in Google Cloud Console Secret Manager — no need to redeploy code or touch GitHub repositories!
+> 3. **Auditable & Secure**: Secrets never appear in GitHub logs or runner disk files.
+
+### Secrets Configured in Secret Manager:
+| Secret Name | Managed In Project | Purpose |
+| :--- | :--- | :--- |
+| `hms-database-url` | `vaidya-hms-dev` & `vaidya-hms-prod` | Cloud SQL asyncpg connection URL |
+| `hms-jwt-secret` | `vaidya-hms-dev` & `vaidya-hms-prod` | JWT signing secret |
+| `hms-cors-origins` | `vaidya-hms-dev` & `vaidya-hms-prod` | Allowed CORS origins JSON array |
+| `hms-gcs-bucket` | `vaidya-hms-dev` & `vaidya-hms-prod` | File upload storage bucket name |
+| `hms-db-password` | `vaidya-hms-dev` & `vaidya-hms-prod` | Cloud SQL password |
+
+---
+
+## 3. Step 1: Create GitHub Environments
 
 In **both** GitHub repositories:
 - **Backend Repo**: [https://github.com/vaidyahealth9-arch/VaidyaMD_HMS_Backend/settings/environments](https://github.com/vaidyahealth9-arch/VaidyaMD_HMS_Backend/settings/environments)
@@ -38,57 +58,41 @@ In **both** GitHub repositories:
 
 ---
 
-## 3. Step 2: Add Secrets to Backend Repository
+## 4. Step 2: Add Secrets to GitHub
 
+Because Secret Manager and automated domain defaults handle all configuration, you only need to add **`GCP_CREDENTIALS`**!
+
+### A. Backend Repository
 Navigate to: [https://github.com/vaidyahealth9-arch/VaidyaMD_HMS_Backend/settings/environments](https://github.com/vaidyahealth9-arch/VaidyaMD_HMS_Backend/settings/environments)
 
-### A. Under `dev` Environment (Click "Add environment secret"):
+1. Under **`dev`** environment -> Click **Add secret**:
+   - **Secret Name**: `GCP_CREDENTIALS`
+   - **Value**: Content of `.secrets/dev-key.json`
+   - *Quick PowerShell copy*:
+     ```powershell
+     Get-Content 'c:\Users\ranju\OneDrive\Documents\GitHub\Halelabs(Vaidya)\limsAndPhr\VaidyaMD_HMS\new\.secrets\dev-key.json' -Raw | Set-Clipboard
+     ```
+2. Under **`prod`** environment -> Click **Add secret**:
+   - **Secret Name**: `GCP_CREDENTIALS`
+   - **Value**: Content of `.secrets/prod-key.json`
+   - *Quick PowerShell copy*:
+     ```powershell
+     Get-Content 'c:\Users\ranju\OneDrive\Documents\GitHub\Halelabs(Vaidya)\limsAndPhr\VaidyaMD_HMS\new\.secrets\prod-key.json' -Raw | Set-Clipboard
+     ```
 
-| Secret Name | Exact Value to Copy & Paste | Description / Quick Copy |
-| :--- | :--- | :--- |
-| **`GCP_CREDENTIALS`** | Content of `.secrets/dev-key.json` | Run in PowerShell to copy to clipboard:<br>`Get-Content 'c:\Users\ranju\OneDrive\Documents\GitHub\Halelabs(Vaidya)\limsAndPhr\VaidyaMD_HMS\new\.secrets\dev-key.json' -Raw \| Set-Clipboard` |
-| **`DATABASE_URL`** | `postgresql+asyncpg://vaidya_md_admin:vaidya_md_secret_2026@/vaidya_md_db?host=/cloudsql/vaidya-hms-dev:asia-south1:hms-db-dev` | Cloud SQL asyncpg connection for Dev |
-| **`JWT_SECRET_KEY`** | `vaidya_md_jwt_secret_dev_2026_super_secure_antigravity_token` | Dev JWT token signing secret |
-| **`CORS_ORIGINS`** | `["http://localhost:3000","https://dev.vaidyamd.vaidyahealth.com","https://dev.md.vaidyahealth.com","https://dev-api.vaidyamd.vaidyahealth.com","https://dev-api.md.vaidyahealth.com","https://hms-web-1062509658389.asia-south1.run.app","https://lrmtc5jt-3000.inc1.devtunnels.ms"]` | JSON array of permitted dev origins (includes Cloud DNS `dev.vaidyamd.vaidyahealth.com`) |
-
----
-
-### B. Under `prod` Environment (Click "Add environment secret"):
-
-| Secret Name | Exact Value to Copy & Paste | Description / Quick Copy |
-| :--- | :--- | :--- |
-| **`GCP_CREDENTIALS`** | Content of `.secrets/prod-key.json` | Run in PowerShell to copy to clipboard:<br>`Get-Content 'c:\Users\ranju\OneDrive\Documents\GitHub\Halelabs(Vaidya)\limsAndPhr\VaidyaMD_HMS\new\.secrets\prod-key.json' -Raw \| Set-Clipboard` |
-| **`DATABASE_URL`** | `postgresql+asyncpg://vaidya_md_admin:vaidya_md_prod_secret_DuT9xNYMITQLcE2WSQUE3g@/vaidya_md_db?host=/cloudsql/vaidya-hms-prod:asia-south1:hms-db-prod` | Cloud SQL asyncpg connection for Prod |
-| **`JWT_SECRET_KEY`** | `SUP8Dvig537pdINog1_IrMIvtdcGaE_F8WwXzJdwyE9jz4imrsmIzgjORo0xO4W0` | Production high-entropy JWT secret |
-| **`CORS_ORIGINS`** | `["https://vaidyamd.vaidyahealth.com","https://md.vaidyahealth.com","https://api.vaidyamd.vaidyahealth.com","https://api.md.vaidyahealth.com","https://hms-web-242898387149.asia-south1.run.app","https://app.vaidyamd.com","https://vaidyamd.com"]` | JSON array of permitted prod origins (includes Cloud DNS `vaidyamd.vaidyahealth.com`) |
-
----
-
-## 4. Step 3: Add Secrets to Frontend Repository
-
+### B. Frontend Repository
 Navigate to: [https://github.com/vaidyahealth9-arch/VaidyaMD_HMS_Frontend/settings/environments](https://github.com/vaidyahealth9-arch/VaidyaMD_HMS_Frontend/settings/environments)
 
-### A. Under `dev` Environment (Click "Add environment secret"):
+1. Under **`dev`** environment -> Click **Add secret**:
+   - **Secret Name**: `GCP_CREDENTIALS` (Content of `.secrets/dev-key.json`)
+2. Under **`prod`** environment -> Click **Add secret**:
+   - **Secret Name**: `GCP_CREDENTIALS` (Content of `.secrets/prod-key.json`)
 
-| Secret Name | Exact Value to Copy & Paste | Description / Quick Copy |
-| :--- | :--- | :--- |
-| **`GCP_CREDENTIALS`** | Content of `.secrets/dev-key.json` | Run in PowerShell to copy to clipboard:<br>`Get-Content 'c:\Users\ranju\OneDrive\Documents\GitHub\Halelabs(Vaidya)\limsAndPhr\VaidyaMD_HMS\new\.secrets\dev-key.json' -Raw \| Set-Clipboard` |
-| **`NEXT_PUBLIC_API_URL`** | `https://hms-backend-1062509658389.asia-south1.run.app/api` | Dev Cloud Run backend API endpoint |
-| **`NEXT_PUBLIC_WS_URL`** | `wss://hms-backend-1062509658389.asia-south1.run.app/ws` | Dev Cloud Run WebSocket endpoint |
-
----
-
-### B. Under `prod` Environment (Click "Add environment secret"):
-
-| Secret Name | Exact Value to Copy & Paste | Description / Quick Copy |
-| :--- | :--- | :--- |
-| **`GCP_CREDENTIALS`** | Content of `.secrets/prod-key.json` | Run in PowerShell to copy to clipboard:<br>`Get-Content 'c:\Users\ranju\OneDrive\Documents\GitHub\Halelabs(Vaidya)\limsAndPhr\VaidyaMD_HMS\new\.secrets\prod-key.json' -Raw \| Set-Clipboard` |
-| **`NEXT_PUBLIC_API_URL`** | `https://hms-backend-242898387149.asia-south1.run.app/api` | Prod Cloud Run backend API endpoint (or custom domain if configured) |
-| **`NEXT_PUBLIC_WS_URL`** | `wss://hms-backend-242898387149.asia-south1.run.app/ws` | Prod Cloud Run WebSocket endpoint |
+*(Optional: If you want to override the default custom API domain `https://dev-api.vaidyamd.vaidyahealth.com`, you can optionally add `NEXT_PUBLIC_API_URL` as an environment secret, but it is not required!)*
 
 ---
 
-## 5. Step 4: Running Deployments via GitHub Actions
+## 5. Step 3: Trigger Deployments via GitHub Actions
 
 1. Go to the **Actions** tab in either repository:
    - [Backend Actions](https://github.com/vaidyahealth9-arch/VaidyaMD_HMS_Backend/actions)
