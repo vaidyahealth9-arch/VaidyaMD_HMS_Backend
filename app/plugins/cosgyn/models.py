@@ -78,6 +78,8 @@ class CosgynSession(Base):
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     plan_id = Column(UUID(as_uuid=True), ForeignKey('cosgyn_patient_plans.id'), nullable=False)
     session_number = Column(Integer, nullable=False)
+    equipment = Column(String(100), nullable=True)
+    duration_mins = Column(Integer, default=30)
     
     scheduled_datetime = Column(DateTime(timezone=True), nullable=True)
     status = Column(Enum(SessionStatus), default=SessionStatus.SCHEDULED)

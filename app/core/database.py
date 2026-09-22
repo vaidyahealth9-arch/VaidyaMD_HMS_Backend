@@ -76,6 +76,7 @@ async def init_db():
                     branch_id UUID REFERENCES branches(id) ON DELETE SET NULL,
                     counselor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     source VARCHAR(255),
+                    comments TEXT,
                     procedure VARCHAR(255),
                     egg_pick_up TEXT,
                     discussion TEXT,
@@ -87,6 +88,10 @@ async def init_db():
                     updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
                 );
             """))
+            try:
+                await conn.execute(text("ALTER TABLE counseling_notes ADD COLUMN IF NOT EXISTS comments TEXT;"))
+            except Exception:
+                pass
         except Exception:
             pass
 

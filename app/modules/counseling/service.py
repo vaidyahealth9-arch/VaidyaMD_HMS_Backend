@@ -41,6 +41,7 @@ class CounselingService:
             tenant_id=note.tenant_id,
             branch_id=note.branch_id,
             source=note.source,
+            comments=note.comments,
             procedure=note.procedure,
             egg_pick_up=note.egg_pick_up,
             discussion=note.discussion,
@@ -68,6 +69,7 @@ class CounselingService:
             branch_id=getattr(current_user, 'branch_id', None) or getattr(patient, 'branch_id', None),
             counselor_id=current_user.id,
             source=payload.source,
+            comments=payload.comments,
             procedure=payload.procedure,
             egg_pick_up=payload.egg_pick_up,
             discussion=payload.discussion,
@@ -104,6 +106,7 @@ class CounselingService:
             query = query.join(Patient, CounselingNote.patient_id == Patient.id, isouter=True).where(
                 or_(
                     func.lower(CounselingNote.source).like(s),
+                    func.lower(CounselingNote.comments).like(s),
                     func.lower(CounselingNote.procedure).like(s),
                     func.lower(CounselingNote.discussion).like(s),
                     func.lower(CounselingNote.remarks).like(s),

@@ -47,3 +47,7 @@ class DispenseRequest(BaseModel):
     doctor_id: Optional[Any] = None
     notes: Optional[str] = None
     branch_id: Optional[UUID] = None
+    payment_method: Optional[str] = "Cash"
+    payment_ref: Optional[str] = None
+    discount: Optional[float] = 0.0
+    amount_paid: Optional[float] = None

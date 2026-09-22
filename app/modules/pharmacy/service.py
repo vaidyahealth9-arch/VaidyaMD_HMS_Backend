@@ -106,6 +106,19 @@ class PharmacyService:
                     "rack_location": batch.rack_location,
                 })
 
+        total_bill = round(total_bill, 2)
+        discount = float(payload.discount or 0.0)
+        net_amount = max(0.0, round(total_bill - discount, 2))
+        amount_paid = float(payload.amount_paid) if payload.amount_paid is not None else net_amount
+        pay_status = (
+            InvoiceStatus.PAID if amount_paid >= net_amount
+            else (InvoiceStatus.PARTIALLY_PAID if amount_paid > 0 else InvoiceStatus.PENDING)
+        )
+        pay_method = payload.payment_method or "Cash"
+        note_str = payload.notes or "Dispensed via Pharmacy FEFO engine"
+        if payload.payment_ref:
+            note_str += f" | Payment Ref: {payload.payment_ref}"
+
         inv_prefix = f"INV-PHARMA-{branch_code}" if branch_code else "INV-PHARMA"
         inv_num = f"{inv_prefix}-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
         invoice = Invoice(
@@ -114,12 +127,13 @@ class PharmacyService:
             appointment_source="Pharmacy",
             reason_for_attendance="Point of Sale Pharmacy Dispense",
             subtotal=total_bill,
-            total_amount=total_bill,
-            paid_amount=total_bill,
-            status=InvoiceStatus.PAID,
-            payment_method="cash",
+            discount=discount,
+            total_amount=net_amount,
+            paid_amount=amount_paid,
+            status=pay_status,
+            payment_method=pay_method,
             items=dispensed_items_audit,
-            notes=payload.notes or "Dispensed via Pharmacy FEFO engine",
+            notes=note_str,
             tenant_id=tenant_id,
             branch_id=branch_id,
             created_by=creator_id,
@@ -132,8 +146,12 @@ class PharmacyService:
             "message": "Medications dispensed successfully via FEFO logic.",
             "invoice_id": str(invoice.id),
             "invoice_number": inv_num,
-            "invoice_status": "PAID",
-            "total_amount": total_bill,
+            "invoice_status": invoice.status.value if hasattr(invoice.status, 'value') else str(invoice.status),
+            "subtotal": total_bill,
+            "discount": discount,
+            "total_amount": net_amount,
+            "paid_amount": amount_paid,
+            "payment_method": pay_method,
             "patient_name": patient.name,
             "patient_mrn": patient.vid or "",
             "created_at": datetime.utcnow().isoformat(),

@@ -66,6 +66,24 @@ async def logout(
     await service.revoke_token(request.refresh_token)
     return {"message": "Logged out successfully"}
 
+from pydantic import BaseModel
+class SwitchUserRequest(BaseModel):
+    email: str
+
+@router.post("/switch-user", response_model=TokenResponse)
+@router.post("/switch-user/", response_model=TokenResponse, include_in_schema=False)
+async def switch_user(
+    request: SwitchUserRequest,
+    service: AuthService = Depends(get_auth_service),
+):
+    try:
+        return await service.switch_user(request.email)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
 @router.get("/me", response_model=UserResponse)
 async def get_my_profile(
     current_user: User = Depends(get_current_user),

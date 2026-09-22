@@ -12,6 +12,7 @@ from datetime import datetime
 class CounselingNoteCreate(BaseModel):
     patient_id: UUID
     source: Optional[str] = Field(None, description="e.g. OP, Referral, Direct Consultation")
+    comments: Optional[str] = Field(None, description="Comments beside source / additional counselor observations")
     procedure: Optional[str] = Field(None, description="e.g. IVF-ICSI, IUI, FET, Egg Freezing")
     egg_pick_up: Optional[str] = Field(None, description="Egg pick up notes / plans")
     discussion: Optional[str] = Field(None, description="Counseling discussion details")
@@ -23,6 +24,7 @@ class CounselingNoteCreate(BaseModel):
 
 class CounselingNoteUpdate(BaseModel):
     source: Optional[str] = None
+    comments: Optional[str] = None
     procedure: Optional[str] = None
     egg_pick_up: Optional[str] = None
     discussion: Optional[str] = None
@@ -46,6 +48,7 @@ class CounselingNoteResponse(BaseModel):
     tenant_id: UUID
     branch_id: Optional[UUID] = None
     source: Optional[str] = None
+    comments: Optional[str] = None
     procedure: Optional[str] = None
     egg_pick_up: Optional[str] = None
     discussion: Optional[str] = None

@@ -22,6 +22,7 @@ class CounselingNote(Base):
 
     # 8 Required Clinical Columns
     source = Column(String(255), nullable=True, comment="Source e.g. OP, Referral, Direct Consultation")
+    comments = Column(Text, nullable=True, comment="Source comments / additional counselor notes")
     procedure = Column(String(255), nullable=True, comment="Procedure e.g. IVF-ICSI, IUI, FET, Egg Freezing")
     egg_pick_up = Column(Text, nullable=True, comment="Egg pick up notes / plans")
     discussion = Column(Text, nullable=True, comment="Counseling discussion details")

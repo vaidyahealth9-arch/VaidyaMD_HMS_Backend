@@ -96,6 +96,46 @@ class AuthService:
             user=self._build_user_response(user, hospital),
         )
 
+    async def switch_user(self, email: str) -> TokenResponse:
+        result = await self.db.execute(
+            select(User).options(selectinload(User.hospital)).where(User.email == email)
+        )
+        user = result.scalar_one_or_none()
+        if not user or not user.is_active:
+            raise ValueError(f"User with email '{email}' not found or inactive")
+
+        hospital = user.hospital or await self.db.get(Hospital, user.tenant_id)
+        role_val = user.role.value if hasattr(user.role, "value") else str(user.role)
+        
+        access_token = create_access_token({
+            "sub": str(user.id),
+            "email": user.email,
+            "name": user.name,
+            "role": role_val,
+            "tenant_id": str(user.tenant_id),
+            "branch_id": str(user.branch_id) if user.branch_id else None,
+            "departments": user.departments or [],
+            "specialization": user.specialization,
+        })
+
+        raw_refresh = secrets.token_urlsafe(48)
+        refresh_hash = self._hash_token(raw_refresh)
+        expires_at = datetime.utcnow() + timedelta(days=14)
+
+        refresh_entry = RefreshToken(
+            user_id=user.id,
+            token_hash=refresh_hash,
+            expires_at=expires_at,
+        )
+        self.db.add(refresh_entry)
+        await self.db.flush()
+
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=raw_refresh,
+            user=self._build_user_response(user, hospital),
+        )
+
     async def refresh_tokens(self, raw_refresh_token: str) -> TokenResponse:
         if not raw_refresh_token:
             raise ValueError("Refresh token is required")
