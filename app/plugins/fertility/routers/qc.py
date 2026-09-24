@@ -58,6 +58,8 @@ async def create_qc_log(
     # Persist as system-level fertility ClinicalRecord (no patient required)
     record = ClinicalRecord(
         patient_id=None,
+        tenant_id=current_user.tenant_id,
+        branch_id=current_user.branch_id,
         plugin_id="fertility",
         record_type="incubator_qc",
         schema_version="1.0",

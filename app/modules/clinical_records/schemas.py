@@ -10,6 +10,9 @@ class ClinicalRecordCreate(BaseModel):
     plugin_id: str = "opd"
     created_by: Optional[UUID] = None
 
+    class Config:
+        extra = "allow"
+
 class ClinicalRecordResponse(BaseModel):
     id: UUID
     patient_id: UUID

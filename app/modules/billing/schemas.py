@@ -20,9 +20,12 @@ class InvoiceCreate(BaseModel):
     selected_embryologist_id: Optional[UUID] = None
     items: list[InvoiceItem]
     discount: Decimal = Decimal("0")
+    discount_value: Optional[Decimal] = None
+    discount_type: Optional[str] = None
     tax: Decimal = Decimal("0")
     paid_amount: Decimal = Decimal("0")
     wallet_amount_used: Decimal = Decimal("0")
+    wallet_deduction: Optional[Decimal] = None
     payment_method: Optional[str] = "cash"
     upi_pay_mode: Optional[str] = None
     notes: Optional[str] = None
@@ -62,6 +65,7 @@ class PaymentRequest(BaseModel):
     payment_method: str = "cash"
     upi_pay_mode: Optional[str] = None
     notes: Optional[str] = None
+    discount: Optional[Decimal] = Decimal("0")
 
 class TreatmentPackageSchema(BaseModel):
     id: Optional[UUID] = None

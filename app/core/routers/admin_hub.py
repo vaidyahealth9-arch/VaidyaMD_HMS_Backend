@@ -14,6 +14,7 @@ from sqlalchemy import select
 from uuid import UUID
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.database import get_db
 from app.core.models import Hospital, Branch, User
@@ -23,6 +24,7 @@ from app.core.onboarding.engine import (
     get_blank_template_csv,
     export_domain_csv,
     import_domain_csv,
+    preview_domain_csv,
 )
 
 router = APIRouter(prefix="/admin", tags=["Master Admin Hub"])
@@ -174,6 +176,7 @@ async def update_hospital_profile(
                     branch.gstin = b_up.gstin
                 if b_up.receipt_header is not None:
                     branch.receipt_header = b_up.receipt_header
+                    flag_modified(branch, "receipt_header")
 
     await db.commit()
     return {"status": "success", "message": "Hospital profile and branch configurations updated successfully"}
@@ -228,8 +231,8 @@ async def download_csv_template_or_export(
     )
 
 
-@router.post("/import-csv/{domain}")
-async def import_csv_domain(
+@router.post("/preview-csv/{domain}")
+async def preview_csv_domain(
     domain: str,
     file: UploadFile = File(...),
     conflict_mode: str = Form("overwrite"),
@@ -237,8 +240,60 @@ async def import_csv_domain(
     db: AsyncSession = Depends(get_db),
 ):
     """
+    Preview CSV rows before saving. Detects which rows already exist in the database (overrides)
+    versus new insertions, according to the specified conflict_mode ('overwrite' or 'skip').
+    """
+    resolved_key, spec = resolve_domain_spec(domain)
+    if not resolved_key or not spec:
+        raise HTTPException(status_code=404, detail=f"Unknown domain '{domain}'")
+
+    if conflict_mode not in ["overwrite", "skip"]:
+        raise HTTPException(status_code=400, detail="conflict_mode must be either 'overwrite' or 'skip'")
+
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant context required for preview")
+
+    try:
+        raw_bytes = await file.read()
+        csv_content = raw_bytes.decode("utf-8-sig")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Unable to read uploaded CSV file: {str(e)}")
+
+    try:
+        stats = await preview_domain_csv(
+            session=db,
+            hospital_id=current_user.tenant_id,
+            domain=resolved_key,
+            csv_content=csv_content,
+            conflict_mode=conflict_mode,
+        )
+        return {
+            "status": "preview",
+            "domain": domain,
+            "filename": file.filename,
+            "conflict_mode": conflict_mode,
+            "stats": stats,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Preview failed for domain '{domain}': {str(e)}",
+        )
+
+
+@router.post("/import-csv/{domain}")
+async def import_csv_domain(
+    domain: str,
+    file: UploadFile = File(...),
+    conflict_mode: str = Form("overwrite"),
+    dry_run: bool = Form(False),
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
     In-App bulk ingestion for any of the 13 canonical domains.
     Supports conflict_mode: 'overwrite' (upsert) or 'skip' (preserve existing).
+    If dry_run is True, returns preview stats without committing changes.
     """
     resolved_key, spec = resolve_domain_spec(domain)
     if not resolved_key or not spec:
@@ -257,6 +312,28 @@ async def import_csv_domain(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Unable to read uploaded CSV file: {str(e)}")
 
+    if dry_run:
+        try:
+            stats = await preview_domain_csv(
+                session=db,
+                hospital_id=current_user.tenant_id,
+                domain=resolved_key,
+                csv_content=csv_content,
+                conflict_mode=conflict_mode,
+            )
+            return {
+                "status": "preview",
+                "domain": domain,
+                "filename": file.filename,
+                "conflict_mode": conflict_mode,
+                "stats": stats,
+            }
+        except Exception as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Preview failed for domain '{domain}': {str(e)}",
+            )
+
     try:
         stats = await import_domain_csv(
             session=db,
@@ -265,6 +342,11 @@ async def import_csv_domain(
             csv_content=csv_content,
             conflict_mode=conflict_mode,
         )
+        if isinstance(stats, dict) and stats.get("success") is False:
+            raise HTTPException(
+                status_code=400,
+                detail=stats.get("error", "CSV ingestion failed"),
+            )
         await db.commit()
         return {
             "status": "success",
@@ -273,6 +355,9 @@ async def import_csv_domain(
             "conflict_mode": conflict_mode,
             "stats": stats,
         }
+    except HTTPException:
+        await db.rollback()
+        raise
     except Exception as e:
         await db.rollback()
         raise HTTPException(

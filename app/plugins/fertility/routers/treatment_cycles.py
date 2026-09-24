@@ -12,6 +12,7 @@ from datetime import date, datetime
 from pydantic import BaseModel
 from typing import Optional, Any, List, Union
 
+from sqlalchemy.orm.attributes import flag_modified
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.models import TreatmentCycle, TreatmentCycleStatus, ProtocolTemplate, ProtocolDrugRule, Patient, User, Hospital, TreatmentCycleType
@@ -520,13 +521,17 @@ async def update_sentinel_dates(
     if not cycle:
         raise HTTPException(status_code=404, detail="Treatment cycle not found")
 
-    cycle.sentinel_dates = {**cycle.sentinel_dates, **payload.sentinel_dates}
+    cycle.sentinel_dates = {**dict(cycle.sentinel_dates or {}), **payload.sentinel_dates}
+    flag_modified(cycle, "sentinel_dates")
     if payload.endometrial_monitoring is not None:
         cycle.endometrial_monitoring = payload.endometrial_monitoring
+        flag_modified(cycle, "endometrial_monitoring")
 
     await db.flush()
     await db.refresh(cycle)
-    return cycle
+    patient = await db.get(Patient, cycle.patient_id) if cycle.patient_id else None
+    partner = await db.get(Patient, cycle.partner_id) if cycle.partner_id else None
+    return serialize_treatment_cycle(cycle, patient, partner)
 
 
 class CycleUpdate(BaseModel):
@@ -580,12 +585,16 @@ async def update_treatment_cycle(
         cycle.status = payload.status
     if payload.sentinel_dates is not None:
         cycle.sentinel_dates = {**dict(cycle.sentinel_dates or {}), **payload.sentinel_dates}
+        flag_modified(cycle, "sentinel_dates")
     if payload.endometrial_monitoring is not None:
         cycle.endometrial_monitoring = payload.endometrial_monitoring
+        flag_modified(cycle, "endometrial_monitoring")
     if payload.medication_calendar is not None:
         cycle.medication_calendar = payload.medication_calendar
+        flag_modified(cycle, "medication_calendar")
     if payload.et_discharge_summary is not None:
         cycle.et_discharge_summary = {**dict(cycle.et_discharge_summary or {}), **payload.et_discharge_summary}
+        flag_modified(cycle, "et_discharge_summary")
     if payload.remarks is not None:
         cycle.remarks = payload.remarks
     if payload.cancellation_reason:
@@ -610,14 +619,16 @@ async def update_et_discharge(
         raise HTTPException(status_code=404, detail="Treatment cycle not found")
 
     summary = dict(getattr(cycle, "et_discharge_summary", {}) or {})
-    summary.update(payload.dict())
+    summary.update(payload.dict() if hasattr(payload, "dict") else payload.model_dump())
     summary["recorded_at"] = datetime.utcnow().isoformat() + "Z"
     cycle.et_discharge_summary = summary
+    flag_modified(cycle, "et_discharge_summary")
 
     s_dates = dict(cycle.sentinel_dates or {})
     if payload.beta_hcg_due_date:
         s_dates["beta_hcg_due"] = payload.beta_hcg_due_date
     cycle.sentinel_dates = s_dates
+    flag_modified(cycle, "sentinel_dates")
 
     await db.flush()
     await db.refresh(cycle)

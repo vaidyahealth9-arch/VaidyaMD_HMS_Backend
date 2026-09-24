@@ -163,6 +163,8 @@ async def add_invoice_payment(
         return await service.record_payment(invoice_id, payload)
     except InvoiceNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except InsufficientWalletBalanceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/packages", response_model=list[TreatmentPackageSchema])
 @router.get("/packages/", response_model=list[TreatmentPackageSchema], include_in_schema=False)

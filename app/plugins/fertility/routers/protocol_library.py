@@ -93,13 +93,19 @@ async def create_protocol(payload: ProtocolCreate, db: AsyncSession = Depends(ge
     if not hospital:
         raise HTTPException(status_code=500, detail="No hospital configured")
 
+    creator_id = getattr(payload, "created_by", None)
+    if not creator_id:
+        user_res = await db.execute(select(User.id).limit(1))
+        creator_id = user_res.scalar_one_or_none()
+
     template = ProtocolTemplate(
+        tenant_id=hospital.id,
         hospital_id=hospital.id,
         name=payload.name,
         description=payload.description,
         category=payload.category,
         is_active=True,
-        created_by=payload.created_by,
+        created_by=creator_id,
     )
     db.add(template)
     await db.flush()

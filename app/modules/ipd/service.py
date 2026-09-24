@@ -200,7 +200,7 @@ class IPDService:
         await self.db.flush()
         return {"message": f"Bed status updated to {payload.status}", "bed_id": str(bed.id)}
 
-    async def admit_patient(self, payload: AdmissionCreate):
+    async def admit_patient(self, payload: AdmissionCreate, tenant_id: Optional[UUID] = None, branch_id: Optional[UUID] = None):
         bed = await self.db.get(Bed, payload.bed_id)
         if not bed:
             raise ValueError("Bed not found")
@@ -211,10 +211,15 @@ class IPDService:
         if not patient:
             raise ValueError("Patient not found")
 
+        resolved_tenant_id = tenant_id or getattr(bed, "tenant_id", None) or getattr(patient, "tenant_id", None)
+        resolved_branch_id = branch_id or getattr(bed, "branch_id", None) or getattr(patient, "branch_id", None)
+
         adm_num = f"IPD-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
 
         admission = IPDAdmission(
             admission_number=adm_num,
+            tenant_id=resolved_tenant_id,
+            branch_id=resolved_branch_id,
             patient_id=payload.patient_id,
             bed_id=payload.bed_id,
             admitting_doctor_id=payload.admitting_doctor_id,
@@ -232,6 +237,8 @@ class IPDService:
         bed.current_admission_id = admission.id
 
         task1 = NursingTask(
+            tenant_id=resolved_tenant_id,
+            branch_id=resolved_branch_id,
             admission_id=admission.id,
             bed_id=bed.id,
             task_type="Vitals",
@@ -240,6 +247,8 @@ class IPDService:
             status="Pending",
         )
         task2 = NursingTask(
+            tenant_id=resolved_tenant_id,
+            branch_id=resolved_branch_id,
             admission_id=admission.id,
             bed_id=bed.id,
             task_type="Nursing Note",

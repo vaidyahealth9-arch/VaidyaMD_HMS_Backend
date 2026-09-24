@@ -13,6 +13,7 @@ class DeductRequest(BaseModel):
     patient_id: UUID
     amount: float
     reference_invoice_id: Optional[UUID] = None
+    discount: Optional[float] = 0.0
     notes: Optional[str] = None
     created_by: Optional[UUID] = None
 
@@ -24,3 +25,4 @@ class TopUpPayload(BaseModel):
 class PayInvoicePayload(BaseModel):
     invoice_id: UUID
     amount: float
+    discount: Optional[float] = 0.0

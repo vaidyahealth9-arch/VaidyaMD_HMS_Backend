@@ -9,6 +9,7 @@ from app.core.database import Base
 class WalletTxType(str, enum.Enum):
     DEPOSIT = "deposit"
     INVOICE_DEBIT = "invoice_debit"
+    DEBIT = "invoice_debit"
     REFUND = "refund"
 
 class PatientWallet(Base):

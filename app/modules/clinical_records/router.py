@@ -1,6 +1,8 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 from uuid import UUID
 from typing import Optional
 
@@ -25,10 +27,11 @@ async def create_clinical_record(
     if patient.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Cross-tenant clinical record creation denied")
 
-
     record = ClinicalRecord(
         patient_id=data.patient_id,
-        plugin_id=data.plugin_id,
+        tenant_id=patient.tenant_id,
+        branch_id=patient.branch_id or current_user.branch_id,
+        plugin_id=data.plugin_id or "opd",
         record_type=data.record_type,
         schema_version="1.0",
         data=data.data,
@@ -59,9 +62,11 @@ async def get_patient_records(
 
 
 @router.put("/{record_id}", response_model=ClinicalRecordResponse)
+@router.patch("/{record_id}", response_model=ClinicalRecordResponse)
 async def update_clinical_record(
     record_id: UUID, 
     data: dict, 
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Update an existing clinical record's JSONB data."""
@@ -69,11 +74,16 @@ async def update_clinical_record(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    record.data = {**record.data, **data}
+    incoming_data = data.get("data") if ("data" in data and isinstance(data["data"], dict)) else data
+    record.data = {**(record.data or {}), **incoming_data}
+    flag_modified(record, "data")
     
     # If the payload explicitly specifies a new record_type, allow updating it (e.g. opd_triage -> opd_consultation)
     if "record_type" in data:
         record.record_type = data["record_type"]
+
+    record.updated_by = current_user.id
+    record.updated_at = datetime.utcnow()
 
     await db.flush()
     await db.refresh(record)

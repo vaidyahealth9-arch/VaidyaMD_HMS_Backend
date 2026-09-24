@@ -6,7 +6,7 @@ from datetime import date
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, get_branch_context
-from app.core.models import User
+from app.core.models import User, ClinicalRecord, Patient
 from app.modules.patients.schemas import (
     PatientCreate,
     PatientUpdate,
@@ -149,3 +149,35 @@ async def save_patient_consent(
         raise HTTPException(status_code=404, detail="Patient not found")
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+
+
+@router.post("/{patient_id}/clinical-records", status_code=status.HTTP_201_CREATED)
+@router.post("/{patient_id}/clinical-records/", status_code=status.HTTP_201_CREATED)
+async def create_patient_clinical_record(
+    patient_id: UUID,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a clinical record scoped to a patient."""
+    patient = await db.get(Patient, patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    if patient.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Cross-tenant clinical record creation denied")
+
+    record_data = data.get("data") if ("data" in data and isinstance(data["data"], dict)) else data
+    record = ClinicalRecord(
+        patient_id=patient_id,
+        tenant_id=patient.tenant_id,
+        branch_id=patient.branch_id or current_user.branch_id,
+        plugin_id=data.get("plugin_id") or "opd",
+        record_type=data.get("record_type") or "clinical_proforma",
+        schema_version="1.0",
+        data=record_data,
+        created_by=current_user.id,
+    )
+    db.add(record)
+    await db.flush()
+    await db.refresh(record)
+    return record

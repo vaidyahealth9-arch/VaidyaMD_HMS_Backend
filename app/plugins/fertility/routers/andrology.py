@@ -47,6 +47,8 @@ async def create_andrology_record(payload: AndrologyRecordCreate, db: AsyncSessi
 
     record = ClinicalRecord(
         patient_id=payload.patient_id,
+        tenant_id=patient.tenant_id,
+        branch_id=patient.branch_id,
         plugin_id="fertility",
         record_type=payload.record_type or "casa_semen_analysis",
         schema_version="1.0",

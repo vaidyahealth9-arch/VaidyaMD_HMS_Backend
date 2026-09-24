@@ -131,7 +131,11 @@ async def admit_patient(
     service: IPDService = Depends(get_ipd_service),
 ):
     try:
-        return await service.admit_patient(payload)
+        return await service.admit_patient(
+            payload,
+            tenant_id=current_user.tenant_id,
+            branch_id=current_user.branch_id
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

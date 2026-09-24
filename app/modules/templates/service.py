@@ -28,13 +28,21 @@ class ClinicalTemplateService:
             raise ValueError(f"Template with record_type '{record_type}' not found")
         return template
 
-    async def create_template(self, data: ClinicalTemplateCreate):
+    async def create_template(self, data: ClinicalTemplateCreate, tenant_id: UUID = None, branch_id: UUID = None):
         query = select(ClinicalTemplate).where(ClinicalTemplate.record_type == data.record_type)
         result = await self.db.execute(query)
         if result.scalars().first():
             raise ValueError(f"Template with record_type '{data.record_type}' already exists")
 
+        resolved_tenant_id = tenant_id
+        if not resolved_tenant_id:
+            from app.core.models.hospital import Hospital
+            h_res = await self.db.execute(select(Hospital.id).limit(1))
+            resolved_tenant_id = h_res.scalar_one_or_none()
+
         template = ClinicalTemplate(
+            tenant_id=resolved_tenant_id,
+            branch_id=branch_id,
             plugin_id=data.plugin_id,
             record_type=data.record_type,
             title=data.title,

@@ -576,6 +576,250 @@ async def export_domain_csv(session: AsyncSession, hospital_id: UUID, domain: st
 
 
 # =====================================================================
+# In-App CSV Preview Engine (Conflict & Override Analysis)
+# =====================================================================
+async def preview_domain_csv(
+    session: AsyncSession,
+    hospital_id: UUID,
+    domain: str,
+    csv_content: str,
+    conflict_mode: str = "overwrite"
+) -> Dict[str, Any]:
+    """Analyze uploaded CSV rows against live tenant database to detect new vs overriding rows."""
+    d_key = normalize_domain_key(domain)
+    conflict_mode = conflict_mode.lower().strip()
+    if conflict_mode not in ["overwrite", "skip"]:
+        conflict_mode = "overwrite"
+
+    f = io.StringIO(csv_content.strip())
+    reader = list(csv.DictReader(f))
+    if not reader:
+        return {
+            "success": False,
+            "error": "CSV file contains no data rows.",
+            "total_rows": 0,
+            "to_create": 0,
+            "inserted": 0,
+            "to_update": 0,
+            "updated": 0,
+            "to_skip": 0,
+            "skipped": 0,
+            "preview_rows": [],
+            "errors": [],
+        }
+
+    existing_set: set = set()
+    name_map: dict = {}
+
+    try:
+        if d_key == "hospitals":
+            b_res = await session.execute(select(Branch.code, Branch.name).where(Branch.hospital_id == hospital_id))
+            for b_c, b_n in b_res.all():
+                if b_c:
+                    code_key = b_c.upper().strip()
+                    existing_set.add(code_key)
+                    name_map[code_key] = b_n
+        elif d_key == "staff":
+            u_res = await session.execute(select(User.email, User.name).where(User.tenant_id == hospital_id))
+            for em, nm in u_res.all():
+                if em:
+                    em_key = em.lower().strip()
+                    existing_set.add(em_key)
+                    name_map[em_key] = nm
+        elif d_key == "ipd":
+            w_res = await session.execute(select(Ward.code, Ward.name).where(Ward.tenant_id == hospital_id))
+            for wc, wn in w_res.all():
+                if wc:
+                    w_k = f"WARD:{wc.upper().strip()}"
+                    existing_set.add(w_k)
+                    name_map[w_k] = wn
+            bed_res = await session.execute(select(Bed.bed_number, Ward.code).join(Ward, Bed.ward_id == Ward.id).where(Ward.tenant_id == hospital_id))
+            for bnum, wc in bed_res.all():
+                if bnum:
+                    b_k = f"BED:{bnum.strip().upper()}"
+                    existing_set.add(b_k)
+                    name_map[b_k] = f"Bed {bnum} ({wc})"
+        elif d_key == "treatment_cycles":
+            tc_res = await session.execute(select(TreatmentCycleType.name).where(TreatmentCycleType.tenant_id == hospital_id))
+            for (t_name,) in tc_res.all():
+                if t_name:
+                    existing_set.add(t_name.lower().strip())
+        elif d_key == "service_catalog":
+            s_res = await session.execute(select(ServiceItem.code, ServiceItem.name).where(ServiceItem.tenant_id == hospital_id))
+            for sc, sn in s_res.all():
+                if sc:
+                    existing_set.add(sc.lower().strip())
+                    name_map[sc.lower().strip()] = sn
+        elif d_key == "packages":
+            p_res = await session.execute(select(TreatmentPackage.code, TreatmentPackage.name).where(TreatmentPackage.tenant_id == hospital_id))
+            for pc, pn in p_res.all():
+                if pc:
+                    existing_set.add(pc.lower().strip())
+                    name_map[pc.lower().strip()] = pn
+        elif d_key == "protocols":
+            pr_res = await session.execute(select(ProtocolTemplate.name).where(ProtocolTemplate.tenant_id == hospital_id))
+            for (pr_name,) in pr_res.all():
+                if pr_name:
+                    existing_set.add(pr_name.lower().strip())
+        elif d_key in ["templates", "lims", "cryo"]:
+            t_res = await session.execute(select(ClinicalTemplate.record_type, ClinicalTemplate.title).where(ClinicalTemplate.tenant_id == hospital_id))
+            for rt, tt in t_res.all():
+                if rt:
+                    existing_set.add(rt.lower().strip())
+                    name_map[rt.lower().strip()] = tt
+        elif d_key in ["pharmacy_vendors", "vendors"]:
+            v_res = await session.execute(select(PharmacyVendor.name).where(PharmacyVendor.tenant_id == hospital_id))
+            for (vn,) in v_res.all():
+                if vn:
+                    existing_set.add(vn.lower().strip())
+        elif d_key in ["pharmacy_stock", "pharmacy", "stock"]:
+            st_res = await session.execute(select(InventoryBatch.batch_number, InventoryBatch.item_name).where(InventoryBatch.tenant_id == hospital_id))
+            for bn, iname in st_res.all():
+                if bn:
+                    existing_set.add(bn.lower().strip())
+                    name_map[bn.lower().strip()] = iname
+        elif d_key == "patients":
+            pt_res = await session.execute(select(Patient.phone, Patient.name).where(Patient.tenant_id == hospital_id))
+            for p_phone, p_name in pt_res.all():
+                if p_phone:
+                    existing_set.add(p_phone.lower().strip())
+                    name_map[p_phone.lower().strip()] = p_name
+        elif d_key == "cosgyn":
+            cg_res = await session.execute(select(CosgynTreatment.treatment_name).where(CosgynTreatment.tenant_id == hospital_id))
+            for (tn,) in cg_res.all():
+                if tn:
+                    existing_set.add(tn.lower().strip())
+    except Exception as query_err:
+        logger.warning("Could not pre-fetch existing records for domain %s: %s", d_key, query_err)
+
+    preview_rows = []
+    to_create = 0
+    to_update = 0
+    to_skip = 0
+
+    for idx, r in enumerate(reader):
+        row_num = idx + 1
+        ident = ""
+        display_name = ""
+        is_override = False
+
+        if d_key == "hospitals":
+            b_code = s_get(r, "branch_code").upper() or "MAIN"
+            ident = b_code
+            display_name = s_get(r, "branch_name") or s_get(r, "name") or b_code
+            is_override = b_code in existing_set
+        elif d_key == "staff":
+            email = s_get(r, "email").lower().strip()
+            ident = email
+            display_name = s_get(r, "name") or email
+            is_override = email in existing_set
+        elif d_key == "ipd":
+            rec_type = s_get(r, "record_type").upper()
+            w_code = s_get(r, "ward_code").upper()
+            bed_num = s_get(r, "bed_number")
+            if rec_type == "BED" or bed_num:
+                ident = f"Bed {bed_num}"
+                display_name = f"Bed {bed_num} ({w_code})"
+                is_override = f"BED:{bed_num.strip().upper()}" in existing_set
+            else:
+                ident = w_code
+                display_name = s_get(r, "ward_name") or w_code
+                is_override = f"WARD:{w_code.strip().upper()}" in existing_set
+        elif d_key == "treatment_cycles":
+            name = s_get(r, "name")
+            ident = s_get(r, "code") or name
+            display_name = name
+            is_override = name.lower().strip() in existing_set
+        elif d_key == "service_catalog":
+            code = s_get(r, "code") or s_get(r, "service_code")
+            ident = code
+            display_name = s_get(r, "name") or s_get(r, "service_name") or code
+            is_override = code.lower().strip() in existing_set
+        elif d_key == "packages":
+            code = s_get(r, "code") or s_get(r, "package_code")
+            ident = code
+            display_name = s_get(r, "name") or s_get(r, "package_name") or code
+            is_override = code.lower().strip() in existing_set
+        elif d_key == "protocols":
+            name = s_get(r, "name") or s_get(r, "protocol_name")
+            ident = name
+            display_name = name
+            is_override = name.lower().strip() in existing_set
+        elif d_key in ["templates", "lims", "cryo"]:
+            rec_type = s_get(r, "record_type") or s_get(r, "test_code") or s_get(r, "tank_code")
+            title = s_get(r, "title") or s_get(r, "test_name") or s_get(r, "tank_name") or rec_type
+            ident = rec_type
+            display_name = title
+            is_override = rec_type.lower().strip() in existing_set
+        elif d_key in ["pharmacy_vendors", "vendors"]:
+            v_name = s_get(r, "name") or s_get(r, "vendor_name")
+            ident = v_name
+            display_name = v_name
+            is_override = v_name.lower().strip() in existing_set
+        elif d_key in ["pharmacy_stock", "pharmacy", "stock"]:
+            b_num = s_get(r, "batch_number")
+            sku = s_get(r, "item_code") or s_get(r, "item_name") or b_num
+            ident = f"Batch {b_num}"
+            display_name = f"{sku} (Qty: {s_get(r, 'quantity_available') or s_get(r, 'quantity') or 0})"
+            is_override = b_num.lower().strip() in existing_set
+        elif d_key == "patients":
+            p_phone = s_get(r, "phone").strip()
+            p_name = f"{s_get(r, 'first_name')} {s_get(r, 'last_name')}".strip() or s_get(r, "name") or p_phone
+            ident = p_phone or p_name
+            display_name = f"{p_name} ({p_phone})" if p_phone else p_name
+            is_override = p_phone.lower().strip() in existing_set if p_phone else False
+        elif d_key == "cosgyn":
+            name = s_get(r, "treatment_name")
+            ident = name
+            display_name = name
+            is_override = name.lower().strip() in existing_set
+        else:
+            first_val = list(r.values())[0] if r else str(row_num)
+            second_val = list(r.values())[1] if len(r) > 1 else ""
+            ident = first_val
+            display_name = second_val or first_val
+            is_override = False
+
+        if is_override:
+            if conflict_mode == "overwrite":
+                action = "update"
+                to_update += 1
+                details = f"Existing record '{name_map.get(ident.lower(), ident)}' found in database. Will be overwritten/updated."
+            else:
+                action = "skip"
+                to_skip += 1
+                details = f"Existing record '{name_map.get(ident.lower(), ident)}' found in database. Will be preserved (skipped)."
+        else:
+            action = "create"
+            to_create += 1
+            details = "New record. Will be inserted."
+
+        preview_rows.append({
+            "row_index": row_num,
+            "identifier": ident,
+            "name": display_name,
+            "action": action,
+            "is_override": is_override,
+            "details": details,
+            "raw": dict(r)
+        })
+
+    return {
+        "success": True,
+        "domain": d_key,
+        "total_rows": len(reader),
+        "to_create": to_create,
+        "inserted": to_create,
+        "to_update": to_update,
+        "updated": to_update,
+        "to_skip": to_skip,
+        "skipped": to_skip,
+        "preview_rows": preview_rows,
+        "errors": []
+    }
+
+
+# =====================================================================
 # In-App CSV Ingestion Engine
 # =====================================================================
 async def import_domain_csv(
@@ -591,7 +835,7 @@ async def import_domain_csv(
     if conflict_mode not in ["overwrite", "skip"]:
         conflict_mode = "overwrite"
 
-    stats = {"domain": d_key, "created": 0, "updated": 0, "skipped": 0, "errors": []}
+    stats = {"domain": d_key, "created": 0, "inserted": 0, "updated": 0, "skipped": 0, "total_rows": 0, "errors": []}
 
     # Fetch Hospital
     h_res = await session.execute(select(Hospital).where(Hospital.id == hospital_id))
@@ -1083,36 +1327,52 @@ async def import_domain_csv(
                 if rec_type in ["VENDOR"]:
                     v_name = s_get(r, "name") or s_get(r, "vendor_name")
                     if v_name:
+                        b_code = s_get(r, "branch_code").upper()
+                        target_b = branches.get(b_code) or primary_branch
                         q_v = select(PharmacyVendor).where(PharmacyVendor.tenant_id == hospital.id, PharmacyVendor.name == v_name)
                         res_v = await session.execute(q_v)
                         v_obj = res_v.scalar_one_or_none()
                         if not v_obj:
                             v_obj = PharmacyVendor(
                                 tenant_id=hospital.id,
+                                branch_id=target_b.id,
                                 name=v_name,
                                 contact_email=s_get(r, "email") or s_get(r, "contact_email"),
                                 contact_phone=s_get(r, "phone") or s_get(r, "contact_phone"),
-                                gstin=s_get(r, "gstin") or s_get(r, "gst_number"),
+                                gst_number=s_get(r, "gst_number") or s_get(r, "gstin"),
+                                address=s_get(r, "address"),
                                 is_active=True
                             )
                             session.add(v_obj)
                             stats["created"] += 1
                 else:
                     b_num = s_get(r, "batch_number")
-                    sku = s_get(r, "item_code") or s_get(r, "item_name")
-                    if not b_num or not sku:
+                    i_code = s_get(r, "item_code") or s_get(r, "item_name") or f"MED-{b_num}"
+                    i_name = s_get(r, "item_name") or s_get(r, "item_code") or b_num
+                    if not b_num:
                         continue
                     b_code = s_get(r, "branch_code").upper()
                     target_b = branches.get(b_code) or primary_branch
                     q_b = select(InventoryBatch).where(InventoryBatch.tenant_id == hospital.id, InventoryBatch.batch_number == b_num)
                     res_b = await session.execute(q_b)
                     existing_b = res_b.scalar_one_or_none()
+                    qty = int(float(s_get(r, "quantity_available") or s_get(r, "quantity") or s_get(r, "quantity_received") or 0))
+                    purchase_rate = float(s_get(r, "purchase_rate") or 0.0)
+                    mrp = float(s_get(r, "mrp") or 0.0)
+                    selling_price = float(s_get(r, "selling_price") or mrp or 0.0)
                     if existing_b:
                         if conflict_mode == "overwrite":
-                            qty = int(float(s_get(r, "quantity_available") or s_get(r, "quantity") or s_get(r, "quantity_received") or 0))
-                            existing_b.quantity = qty
-                            existing_b.mrp = float(s_get(r, "mrp") or 0.0)
-                            existing_b.purchase_rate = float(s_get(r, "purchase_rate") or 0.0)
+                            existing_b.quantity_available = qty
+                            existing_b.quantity_received = max(existing_b.quantity_received or 0, qty)
+                            existing_b.mrp = mrp
+                            existing_b.selling_price = selling_price
+                            existing_b.purchase_rate = purchase_rate
+                            if s_get(r, "generic_name"):
+                                existing_b.generic_name = s_get(r, "generic_name")
+                            if s_get(r, "category"):
+                                existing_b.category = s_get(r, "category")
+                            if s_get(r, "rack_location"):
+                                existing_b.rack_location = s_get(r, "rack_location")
                             stats["updated"] += 1
                         else:
                             stats["skipped"] += 1
@@ -1124,21 +1384,96 @@ async def import_domain_csv(
                                 exp_date = date.fromisoformat(exp_str[:10])
                             except Exception:
                                 pass
-                        qty = int(float(s_get(r, "quantity_available") or s_get(r, "quantity") or s_get(r, "quantity_received") or 0))
                         new_batch = InventoryBatch(
                             tenant_id=hospital.id,
                             branch_id=target_b.id,
-                            sku=sku,
+                            item_code=i_code,
+                            item_name=i_name,
+                            generic_name=s_get(r, "generic_name"),
+                            category=s_get(r, "category") or "Fertility / Injectables",
                             batch_number=b_num,
-                            manufacturer=s_get(r, "manufacturer"),
                             expiry_date=exp_date or date(2027, 12, 31),
-                            mrp=float(s_get(r, "mrp") or 0.0),
-                            purchase_rate=float(s_get(r, "purchase_rate") or 0.0),
-                            quantity=qty,
+                            quantity_received=qty,
+                            quantity_available=qty,
+                            purchase_rate=purchase_rate,
+                            mrp=mrp,
+                            selling_price=selling_price,
+                            rack_location=s_get(r, "rack_location") or "Cold Chain Fridge 1",
                             is_active=True
                         )
                         session.add(new_batch)
                         stats["created"] += 1
+
+        elif d_key == "patients":
+            hosp_code = (hospital.code or "VMD")[:3].upper().ljust(3, "X")
+            p_count_res = await session.execute(select(Patient.id))
+            base_count = len(p_count_res.all()) + 1
+
+            for r in reader:
+                phone = s_get(r, "phone").strip()
+                f_name = s_get(r, "first_name") or s_get(r, "name")
+                l_name = s_get(r, "last_name") or s_get(r, "surname") or ""
+                full_name = f"{f_name} {l_name}".strip() if l_name else f_name
+                if not phone and not full_name:
+                    continue
+
+                b_code = s_get(r, "branch_code").upper()
+                target_b = branches.get(b_code) or primary_branch
+                gender_str = s_get(r, "gender").lower()
+                gender_enum = Gender.FEMALE if gender_str in ["female", "f"] else Gender.MALE if gender_str in ["male", "m"] else Gender.OTHER
+
+                dob_val = None
+                dob_str = s_get(r, "dob")
+                if dob_str:
+                    try:
+                        dob_val = date.fromisoformat(dob_str[:10])
+                    except Exception:
+                        pass
+
+                raw_aadhaar = s_get(r, "aadhaar_raw") or s_get(r, "aadhaar")
+                enc_aadhaar = encrypt_pii(raw_aadhaar) if raw_aadhaar else None
+
+                q_p = select(Patient).where(Patient.tenant_id == hospital.id, Patient.phone == phone) if phone else select(Patient).where(Patient.tenant_id == hospital.id, Patient.name == full_name)
+                res_p = await session.execute(q_p)
+                existing_p = res_p.scalar_one_or_none()
+
+                if existing_p:
+                    if conflict_mode == "overwrite":
+                        existing_p.name = full_name or existing_p.name
+                        existing_p.surname = l_name or existing_p.surname
+                        existing_p.gender = gender_enum
+                        if dob_val:
+                            existing_p.dob = dob_val
+                        if s_get(r, "blood_group"):
+                            existing_p.blood_group = s_get(r, "blood_group")
+                        if s_get(r, "email"):
+                            existing_p.email = s_get(r, "email")
+                        if s_get(r, "city"):
+                            existing_p.area = s_get(r, "city")
+                        if enc_aadhaar:
+                            existing_p.aadhaar_encrypted = enc_aadhaar
+                        existing_p.branch_id = target_b.id
+                        stats["updated"] += 1
+                    else:
+                        stats["skipped"] += 1
+                else:
+                    vid = f"VH-{hosp_code}-{(base_count + stats['created']):07d}"
+                    new_p = Patient(
+                        tenant_id=hospital.id,
+                        branch_id=target_b.id,
+                        vid=vid,
+                        name=full_name or "Unknown Patient",
+                        surname=l_name,
+                        gender=gender_enum,
+                        dob=dob_val,
+                        blood_group=s_get(r, "blood_group"),
+                        phone=phone or f"999{base_count:07d}",
+                        email=s_get(r, "email"),
+                        area=s_get(r, "city"),
+                        aadhaar_encrypted=enc_aadhaar,
+                    )
+                    session.add(new_p)
+                    stats["created"] += 1
 
         elif d_key == "cosgyn":
             for r in reader:
@@ -1173,10 +1508,15 @@ async def import_domain_csv(
 
         await session.commit()
         stats["success"] = True
+        stats["inserted"] = stats["created"]
+        stats["total_rows"] = len(reader)
         stats["message"] = f"Successfully imported {stats['created']} new records, updated {stats['updated']} records."
         return stats
 
     except Exception as e:
         await session.rollback()
-        logger.exception("Failed importing CSV domain %s", d_key)
+        logger.exception("Failed importing CSV domain %s: %s", d_key, str(e))
+        stats["success"] = False
+        stats["error"] = str(e)
+        stats["inserted"] = stats.get("created", 0)
         return {"success": False, "error": str(e), "stats": stats}

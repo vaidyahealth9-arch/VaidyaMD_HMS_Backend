@@ -121,16 +121,21 @@ class BillingService:
                 branch_code = b.code
 
         subtotal = sum(item.total for item in data.items)
-        total = subtotal - data.discount + data.tax
+        discount = data.discount
+        if not discount and getattr(data, "discount_value", None):
+            discount = Decimal(str(data.discount_value))
+        total = subtotal - discount + data.tax
 
         initial_paid = Decimal(str(data.paid_amount or 0))
-        wallet_used = Decimal(str(data.wallet_amount_used or 0))
+        wallet_used = Decimal(str(data.wallet_amount_used or data.wallet_deduction or 0))
 
+        wallet = None
         if wallet_used > Decimal("0"):
             wallet_res = await self.db.execute(select(PatientWallet).where(PatientWallet.patient_id == patient.id))
             wallet = wallet_res.scalar_one_or_none()
             if not wallet or wallet.balance < wallet_used:
-                raise InsufficientWalletBalanceError("Insufficient patient advance wallet balance")
+                avail = wallet.balance if wallet else Decimal("0")
+                raise InsufficientWalletBalanceError(f"Insufficient patient advance wallet balance (Available: ₹{avail})")
             wallet.balance -= wallet_used
             initial_paid += wallet_used
 
@@ -232,15 +237,17 @@ class BillingService:
                     flag_modified(pt_pkg, "items")
                     await self.db.flush()
 
-        if wallet_used > Decimal("0"):
+        if wallet_used > Decimal("0") and wallet:
             w_tx = WalletTransaction(
                 wallet_id=wallet.id,
-                transaction_type=WalletTxType.DEBIT,
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                transaction_type=WalletTxType.INVOICE_DEBIT,
                 amount=wallet_used,
-                balance_after=wallet.balance,
+                payment_mode="wallet",
                 reference_invoice_id=invoice.id,
                 notes=f"Deducted for Invoice #{invoice.invoice_number}",
-                created_by=user_creator,
+                created_by=user_creator or invoice.created_by,
             )
             self.db.add(w_tx)
             await self.db.flush()
@@ -276,6 +283,36 @@ class BillingService:
         if not invoice:
             raise InvoiceNotFoundError("Invoice not found")
 
+        if payload.discount and payload.discount > Decimal("0"):
+            invoice.discount = (invoice.discount or Decimal("0")) + payload.discount
+            invoice.total_amount = max(Decimal("0"), invoice.total_amount - payload.discount)
+
+        is_wallet = payload.payment_method and "wallet" in payload.payment_method.lower()
+        if is_wallet and payload.amount > Decimal("0"):
+            wallet_res = await self.db.execute(select(PatientWallet).where(PatientWallet.patient_id == invoice.patient_id))
+            wallet = wallet_res.scalar_one_or_none()
+            if not wallet or wallet.balance < payload.amount:
+                avail = wallet.balance if wallet else Decimal("0")
+                raise InsufficientWalletBalanceError(f"Insufficient patient advance wallet balance (Available: ₹{avail})")
+
+            wallet.balance -= payload.amount
+            invoice.wallet_amount_used = (invoice.wallet_amount_used or Decimal("0")) + payload.amount
+
+            w_tx = WalletTransaction(
+                wallet_id=wallet.id,
+                tenant_id=invoice.tenant_id,
+                branch_id=invoice.branch_id,
+                transaction_type=WalletTxType.INVOICE_DEBIT,
+                amount=payload.amount,
+                payment_mode="wallet",
+                reference_invoice_id=invoice.id,
+                notes=f"Deducted for Invoice #{invoice.invoice_number}" + (f" | {payload.notes}" if payload.notes else ""),
+                created_by=invoice.created_by,
+            )
+            self.db.add(w_tx)
+            await self.db.flush()
+            await self.db.refresh(wallet)
+
         invoice.paid_amount += payload.amount
         if invoice.paid_amount >= invoice.total_amount:
             invoice.status = InvoiceStatus.PAID
@@ -286,6 +323,9 @@ class BillingService:
             invoice.payment_method = payload.payment_method
         if payload.upi_pay_mode:
             invoice.upi_pay_mode = payload.upi_pay_mode
+        if payload.notes:
+            existing_notes = f"{invoice.notes} | " if invoice.notes else ""
+            invoice.notes = f"{existing_notes}{payload.notes}"
 
         await self.db.flush()
         await self.db.refresh(invoice)

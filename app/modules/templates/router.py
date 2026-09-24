@@ -43,7 +43,11 @@ async def create_template(
     try:
         if not data.created_by:
             data.created_by = current_user.id
-        return await service.create_template(data)
+        return await service.create_template(
+            data,
+            tenant_id=current_user.tenant_id,
+            branch_id=current_user.branch_id
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 

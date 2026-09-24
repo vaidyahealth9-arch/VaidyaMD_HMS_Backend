@@ -80,6 +80,7 @@ async def pay_invoice_from_wallet(
         patient_id=patient_id,
         amount=payload.amount,
         reference_invoice_id=payload.invoice_id,
+        discount=payload.discount or 0.0,
         notes=f"Paid against invoice {payload.invoice_id}",
         created_by=current_user.id,
     )
