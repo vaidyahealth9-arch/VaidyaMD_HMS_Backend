@@ -26,7 +26,8 @@ LOCAL_DEFAULT_URL = "postgresql+asyncpg://vaidya_md_admin:vaidya_md_secret_2026@
 def _get_gcp_secret(secret_name: str, project_id: str) -> str | None:
     """Attempt to fetch a secret via gcloud CLI if available."""
     try:
-        cmd = ["gcloud", "secrets", "versions", "access", "latest", f"--secret={secret_name}", f"--project={project_id}"]
+        bin_name = "gcloud.cmd" if sys.platform == "win32" else "gcloud"
+        cmd = [bin_name, "secrets", "versions", "access", "latest", f"--secret={secret_name}", f"--project={project_id}"]
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         return res.stdout.strip()
     except Exception:
@@ -49,14 +50,9 @@ def resolve_database_url(env_name: str = "local", explicit_url: str | None = Non
         elif env_lower in ["dev", "vaidya-hms-dev"]:
             url = os.environ.get("DEV_DATABASE_URL")
             if not url:
-                # Try fetching hms-database-url from Secret Manager in vaidya-hms-dev
-                secret_url = _get_gcp_secret("hms-database-url", "vaidya-hms-dev")
-                if secret_url:
-                    url = secret_url
-                else:
-                    # Cloud SQL Proxy local port 5433 fallback
-                    password = _get_gcp_secret("hms-db-password", "vaidya-hms-dev") or "vaidya_md_secret_2026"
-                    url = f"postgresql+asyncpg://vaidya_md_admin:{password}@127.0.0.1:5433/vaidya_md_db"
+                # Cloud SQL Proxy local port 5433
+                password = _get_gcp_secret("hms-db-password", "vaidya-hms-dev") or "vaidya_md_secret_2026"
+                url = f"postgresql+asyncpg://vaidya_md_admin:{password}@127.0.0.1:5433/vaidya_md_db"
 
         elif env_lower in ["prod", "production", "vaidya-hms-prod"]:
             if not auto_confirm and sys.stdin.isatty():
@@ -70,13 +66,9 @@ def resolve_database_url(env_name: str = "local", explicit_url: str | None = Non
 
             url = os.environ.get("PROD_DATABASE_URL")
             if not url:
-                secret_url = _get_gcp_secret("hms-database-url", "vaidya-hms-prod")
-                if secret_url:
-                    url = secret_url
-                else:
-                    # Cloud SQL Proxy local port 5434 fallback
-                    password = _get_gcp_secret("hms-db-password", "vaidya-hms-prod") or "vaidya_md_secret_2026"
-                    url = f"postgresql+asyncpg://vaidya_md_admin:{password}@127.0.0.1:5434/vaidya_md_db"
+                # Cloud SQL Proxy local port 5434
+                password = _get_gcp_secret("hms-db-password", "vaidya-hms-prod") or "vaidya_md_prod_secret_DuT9xNYMITQLcE2WSQUE3g"
+                url = f"postgresql+asyncpg://vaidya_md_admin:{password}@127.0.0.1:5434/vaidya_md_db"
 
         else:
             raise ValueError(f"Unknown environment '{env_name}'. Choose from: 'local', 'dev', 'prod'.")
