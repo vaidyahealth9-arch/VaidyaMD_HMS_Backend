@@ -29,6 +29,9 @@ class AuthService:
     def _build_user_response(self, user: User, hospital: Hospital | None = None) -> UserResponse:
         h_name = hospital.name if hospital else None
         h_logo = hospital.logo_url if hospital else None
+        h_address = hospital.address if hospital else None
+        h_phone = hospital.phone if hospital else None
+        h_email = hospital.email if hospital else None
         h_plugins = hospital.active_plugins if hospital else []
         role_str = user.role.value if hasattr(user.role, "value") else str(user.role)
         is_doc = True if role_str.lower() == "doctor" else bool(user.is_doctor)
@@ -48,6 +51,9 @@ class AuthService:
             branch_id=user.branch_id,
             hospital_name=h_name,
             hospital_logo_url=h_logo,
+            hospital_address=h_address,
+            hospital_phone=h_phone,
+            hospital_email=h_email,
             active_plugins=h_plugins,
             is_active=user.is_active if user.is_active is not None else True,
         )

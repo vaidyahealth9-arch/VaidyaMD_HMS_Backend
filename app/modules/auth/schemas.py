@@ -22,6 +22,9 @@ class UserResponse(BaseModel):
     branch_id: Optional[UUID] = None
     hospital_name: Optional[str] = None
     hospital_logo_url: Optional[str] = None
+    hospital_address: Optional[str] = None
+    hospital_phone: Optional[str] = None
+    hospital_email: Optional[str] = None
     active_plugins: Optional[list[str]] = None
     is_active: bool = True
 
