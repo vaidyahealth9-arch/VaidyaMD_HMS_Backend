@@ -5,6 +5,7 @@ from sqlalchemy import select
 from uuid import UUID
 from typing import Optional, List, Dict, Any
 
+from fastapi import HTTPException
 from app.core.models import Patient, Invoice, Hospital
 from app.modules.billing.model import InvoiceStatus
 from app.modules.pharmacy.model import (
@@ -492,4 +493,88 @@ class PharmacyService:
         vendor.is_active = False
         await self.db.commit()
         return {"status": "success", "message": "Vendor deleted successfully"}
+
+    async def create_batch(self, data: dict, tenant_id: UUID, branch_id: Optional[UUID] = None) -> InventoryBatch:
+        exp_date = date.today() + timedelta(days=365)
+        if data.get("expiry_date"):
+            try:
+                exp_date = date.fromisoformat(str(data["expiry_date"]).split("T")[0])
+            except Exception:
+                pass
+
+        target_branch_id = branch_id
+        if data.get("branch_id"):
+            try:
+                target_branch_id = UUID(str(data["branch_id"]))
+            except Exception:
+                pass
+
+        batch = InventoryBatch(
+            tenant_id=tenant_id,
+            branch_id=target_branch_id,
+            item_code=str(data.get("item_code") or f"DRUG-{uuid.uuid4().hex[:6].upper()}").strip(),
+            item_name=str(data.get("item_name") or "Medication").strip(),
+            generic_name=str(data.get("generic_name") or "").strip() or None,
+            category=str(data.get("category") or "General Pharmacy").strip(),
+            batch_number=str(data.get("batch_number") or f"B{uuid.uuid4().hex[:6].upper()}").strip(),
+            expiry_date=exp_date,
+            quantity_received=int(data.get("quantity_received", data.get("quantity_available", 0)) or 0),
+            quantity_available=int(data.get("quantity_available", 0) or 0),
+            purchase_rate=float(data.get("purchase_rate", 0.0) or 0.0),
+            mrp=float(data.get("mrp", 0.0) or 0.0),
+            selling_price=float(data.get("selling_price", data.get("mrp", 0.0)) or 0.0),
+            rack_location=str(data.get("rack_location") or "Rack A-01").strip(),
+            is_active=bool(data.get("is_active", True)),
+        )
+        self.db.add(batch)
+        await self.db.commit()
+        await self.db.refresh(batch)
+        return batch
+
+    async def update_batch(self, batch_id: UUID, data: dict, tenant_id: UUID) -> InventoryBatch:
+        batch = await self.db.get(InventoryBatch, batch_id)
+        if not batch or batch.tenant_id != tenant_id:
+            raise HTTPException(status_code=404, detail="Inventory batch not found")
+
+        for key in ["item_code", "item_name", "generic_name", "category", "batch_number", "rack_location"]:
+            if key in data and data[key] is not None:
+                setattr(batch, key, str(data[key]).strip())
+
+        if "is_active" in data and data["is_active"] is not None:
+            batch.is_active = bool(data["is_active"])
+
+        if "expiry_date" in data and data["expiry_date"]:
+            try:
+                batch.expiry_date = date.fromisoformat(str(data["expiry_date"]).split("T")[0])
+            except Exception:
+                pass
+
+        if "quantity_available" in data and data["quantity_available"] is not None:
+            batch.quantity_available = int(data["quantity_available"])
+        if "quantity_received" in data and data["quantity_received"] is not None:
+            batch.quantity_received = int(data["quantity_received"])
+        if "purchase_rate" in data and data["purchase_rate"] is not None:
+            batch.purchase_rate = float(data["purchase_rate"])
+        if "mrp" in data and data["mrp"] is not None:
+            batch.mrp = float(data["mrp"])
+        if "selling_price" in data and data["selling_price"] is not None:
+            batch.selling_price = float(data["selling_price"])
+        if "branch_id" in data:
+            try:
+                batch.branch_id = UUID(str(data["branch_id"])) if data["branch_id"] else None
+            except Exception:
+                pass
+
+        await self.db.commit()
+        await self.db.refresh(batch)
+        return batch
+
+    async def delete_batch(self, batch_id: UUID, tenant_id: UUID) -> dict:
+        batch = await self.db.get(InventoryBatch, batch_id)
+        if not batch or batch.tenant_id != tenant_id:
+            raise HTTPException(status_code=404, detail="Inventory batch not found")
+        batch.is_active = False
+        await self.db.commit()
+        return {"status": "success", "message": "Inventory batch deactivated successfully"}
+
 

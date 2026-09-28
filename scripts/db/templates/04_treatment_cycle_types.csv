@@ -1,0 +1,44 @@
+name,category,display_order,is_active,branch_code
+"ICSI",Stimulation,1,true,MAIN
+"IVF",Stimulation,2,true,MAIN
+"Frozen Embryo Transfer (FET)",FET,3,true,MAIN
+"ICSI + FET",Stimulation,4,true,MAIN
+"ICSI + PGT-A",Stimulation,5,true,MAIN
+"ICSI + PGT-M",Stimulation,6,true,MAIN
+"Fresh Embryo Transfer",Stimulation,7,true,MAIN
+"IUI - H",IUI,8,true,MAIN
+"IUI - D",IUI,9,true,MAIN
+"Egg Freeze",Preservation,10,true,MAIN
+"Egg Donation",Third-Party,11,true,MAIN
+"Egg Sharing",Third-Party,12,true,MAIN
+"Natural Cycle",Stimulation,13,true,MAIN
+"Ovulation Induction",IUI,14,true,MAIN
+"PGT-A",Diagnostics,15,true,MAIN
+"PGT-M",Diagnostics,16,true,MAIN
+"Surrogate Commissioning Couple",Third-Party,17,true,MAIN
+"Surrogate Commissioning Couple + PGT-A",Third-Party,18,true,MAIN
+"Surrogate Commissioning Couple + PGT-M",Third-Party,19,true,MAIN
+"Frozen Embryo Transfer (FET) - Surrogate",FET,20,true,MAIN
+"FRESH EMBRYO TRANSFER ( SURROGATE )",Stimulation,21,true,MAIN
+"ICSI (Surrogate)",Third-Party,22,true,MAIN
+"ICSI + FRESH ET",Stimulation,23,true,MAIN
+"ICSI with * Eggs",Third-Party,24,true,MAIN
+"ICSI with * Sperm",Third-Party,25,true,MAIN
+"ICSI with *Eggs & * Sperm",Third-Party,26,true,MAIN
+"ICSI Own and * Eggs",Third-Party,27,true,MAIN
+"ICSI Own and * Eggs & * Sperm",Third-Party,28,true,MAIN
+"ICSI with * Eggs - Own &* Sperm",Third-Party,29,true,MAIN
+"ICSI with * Eggs + PGT",Diagnostics,30,true,MAIN
+"ICSI with * Eggs + PGT-M",Diagnostics,31,true,MAIN
+"ICSI with * Eggs + TESA Sperm",Surgical,32,true,MAIN
+"ICSI with Own & * Sperm",Third-Party,33,true,MAIN
+"ICSI with TESA and * Sperm",Surgical,34,true,MAIN
+"ICSI with TESA Sperm",Surgical,35,true,MAIN
+"ICSI WITH *EGGS (SURROGATE)",Third-Party,36,true,MAIN
+"ICSI WITH *EGGS (SURROGATE COMMISSIONING COUP",Third-Party,37,true,MAIN
+"* Embryo Transfer with PGS",FET,38,true,MAIN
+"* Embryo Transfer",FET,39,true,MAIN
+"Fresh *ET",Stimulation,40,true,MAIN
+"Frozen *ET",FET,41,true,MAIN
+"Hospital Embryos",Third-Party,42,true,MAIN
+"Overseas Cycle",International,43,true,MAIN

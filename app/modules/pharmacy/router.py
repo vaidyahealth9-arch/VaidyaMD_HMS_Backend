@@ -65,6 +65,39 @@ async def list_inventory_batches(
 ):
     return await service.list_inventory_batches(category, search, tenant_id=current_user.tenant_id, branch_id=branch_id)
 
+@router.post("/batches", status_code=201)
+@router.post("/batches/", status_code=201, include_in_schema=False)
+async def create_inventory_batch(
+    payload: dict,
+    branch_id: Optional[UUID] = Depends(get_branch_context),
+    current_user: User = Depends(get_current_user),
+    service: PharmacyService = Depends(get_pharmacy_service)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required to create batch")
+    return await service.create_batch(payload, tenant_id=current_user.tenant_id, branch_id=branch_id)
+
+@router.put("/batches/{batch_id}")
+async def update_inventory_batch(
+    batch_id: UUID,
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+    service: PharmacyService = Depends(get_pharmacy_service)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required to update batch")
+    return await service.update_batch(batch_id, payload, tenant_id=current_user.tenant_id)
+
+@router.delete("/batches/{batch_id}")
+async def delete_inventory_batch(
+    batch_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: PharmacyService = Depends(get_pharmacy_service)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required to delete batch")
+    return await service.delete_batch(batch_id, tenant_id=current_user.tenant_id)
+
 @router.get("/indents")
 @router.get("/indents/", include_in_schema=False)
 async def list_indents(

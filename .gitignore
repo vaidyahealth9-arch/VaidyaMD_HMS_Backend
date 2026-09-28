@@ -22,6 +22,8 @@ service-account*.json
 *.db
 *.csv
 *.xlsx
+!scripts/db/templates/*.csv
+scripts/db/templates/12_patients_bulk.csv
 
 # Python Artifacts & Caches
 __pycache__/

@@ -1,0 +1,6 @@
+record_type,ward_code,ward_name,department,base_charge_per_day,bed_number,bed_type,daily_rate,status,branch_code
+WARD,DELUXE,Deluxe Post-OP Room,Inpatient Care,16000,,,0,,MAIN
+WARD,SUITE,Deluxe Post-OP Suite,Inpatient Care,20000,,,0,,MAIN
+BED,DELUXE,Deluxe Post-OP Room,Inpatient Care,16000,DLX-1,electric_fowler,16000,Vacant,MAIN
+BED,DELUXE,Deluxe Post-OP Room,Inpatient Care,16000,DLX-2,electric_fowler,16000,Vacant,MAIN
+BED,SUITE,Deluxe Post-OP Suite,Inpatient Care,20000,S-1,electric_fowler,20000,Vacant,MAIN

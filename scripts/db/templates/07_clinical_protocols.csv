@@ -1,0 +1,27 @@
+record_type,protocol_name,category,description,drug_name,dose,route,frequency,day_start_offset,day_end_offset,sentinel_anchor,instructions,branch_code
+PROTOCOL,Standard Antagonist Protocol,antagonist,"Standard fixed or flexible GnRH antagonist stimulation protocol for normo-responders",,,,,,,,,MAIN
+DRUG_RULE,Standard Antagonist Protocol,,,Recombinant FSH (Gonal-F),225 IU,Subcutaneous,OD,2,10,stim_start,"Administer nightly between 8:00 PM - 9:00 PM",MAIN
+DRUG_RULE,Standard Antagonist Protocol,,,Menopur (hMG),75 IU,Intramuscular,OD,2,10,stim_start,"Combine with rFSH in lower abdomen/gluteal region",MAIN
+DRUG_RULE,Standard Antagonist Protocol,,,Cetrorelix (Cetrotide),0.25 mg,Subcutaneous,OD,6,10,stim_start,"Start on Day 6 or when lead follicle >= 14 mm",MAIN
+DRUG_RULE,Standard Antagonist Protocol,,,Ovidrel (rhCG),250 mcg,Subcutaneous,STAT,11,11,stim_start,"Trigger injection exactly 35.5 hours prior to scheduled OPU",MAIN
+PROTOCOL,HRT Frozen Embryo Transfer (HRT FET) Protocol,fet,"Hormone replacement cycle with oral estradiol valerate and timed micronized progesterone support",,,,,,,,,MAIN
+DRUG_RULE,HRT Frozen Embryo Transfer (HRT FET) Protocol,,,Progynova (Estradiol Valerate),2 mg,Oral,TDS,2,14,stim_start,"Gradually increases endometrial thickness; take after meals",MAIN
+DRUG_RULE,HRT Frozen Embryo Transfer (HRT FET) Protocol,,,Aspirin (Ecosprin),75 mg,Oral,OD,2,28,stim_start,"Vascular impedance support; take after lunch",MAIN
+DRUG_RULE,HRT Frozen Embryo Transfer (HRT FET) Protocol,,,Susten / Endogest (Progesterone),400 mg,Vaginal,BD,0,14,p0_date,"Initiate on P0 day exactly 120 hours prior to Day 5 blastocyst transfer",MAIN
+DRUG_RULE,HRT Frozen Embryo Transfer (HRT FET) Protocol,,,Dydrogesterone (Duphaston),10 mg,Oral,BD,0,14,p0_date,"Oral luteal phase booster",MAIN
+PROTOCOL,PPOS Protocol (Progestin-Primed),antagonist,"Oral progestin suppression during ovarian stimulation for planned freeze-all cycles",,,,,,,,,MAIN
+DRUG_RULE,PPOS Protocol (Progestin-Primed),,,Recombinant FSH (Gonal-F),225 IU,Subcutaneous,OD,2,11,stim_start,"Daily gonadotropin stimulation starting cycle day 2",MAIN
+DRUG_RULE,PPOS Protocol (Progestin-Primed),,,Medroxyprogesterone Acetate (MPA),10 mg,Oral,OD,2,11,stim_start,"Prevents premature LH surge orally; continue until trigger",MAIN
+DRUG_RULE,PPOS Protocol (Progestin-Primed),,,Decapeptyl (Triptorelin),0.2 mg,Subcutaneous,STAT,12,12,stim_start,"Dual or agonist trigger for OHSS reduction",MAIN
+PROTOCOL,Long Agonist Downregulation Protocol,agonist,"Pituitary desensitization using GnRH agonist from mid-luteal phase for high or erratic responders",,,,,,,,,MAIN
+DRUG_RULE,Long Agonist Downregulation Protocol,,,Decapeptyl / Lupride,0.5 mg,Subcutaneous,OD,-14,-1,stim_start,"Mid-luteal suppression check prior to stimulation onset",MAIN
+DRUG_RULE,Long Agonist Downregulation Protocol,,,Recombinant FSH (Gonal-F),150 IU,Subcutaneous,OD,1,10,stim_start,"Stimulation start after confirmed basal estradiol & LH",MAIN
+DRUG_RULE,Long Agonist Downregulation Protocol,,,Ovidrel (rhCG),250 mcg,Subcutaneous,STAT,11,11,stim_start,"Final oocyte maturation trigger",MAIN
+PROTOCOL,IUI Ovulation Induction (Letrozole + Gonadotropins),iui,"Mild ovarian stimulation for IUI or timed intercourse with aromatase inhibitor",,,,,,,,,MAIN
+DRUG_RULE,IUI Ovulation Induction (Letrozole + Gonadotropins),,,Letrozole (Femara),2.5 mg,Oral,BD,2,6,stim_start,"Promotes mono/di-follicular recruitment without anti-estrogenic endometrial thinning",MAIN
+DRUG_RULE,IUI Ovulation Induction (Letrozole + Gonadotropins),,,Menopur (hMG),75 IU,Subcutaneous,OD,7,9,stim_start,"Selective follicle booster if lead follicle < 14mm on Day 7",MAIN
+DRUG_RULE,IUI Ovulation Induction (Letrozole + Gonadotropins),,,Choriogonadotropin Alfa (rhCG),250 mcg,Subcutaneous,STAT,12,12,stim_start,"Administer when lead follicle reaches >= 18mm; IUI 36 hours later",MAIN
+PROTOCOL,Poor Responder Microdose Flare Protocol,agonist,"Short flare protocol utilizing endogenous gonadotropin surge for low ovarian reserve",,,,,,,,,MAIN
+DRUG_RULE,Poor Responder Microdose Flare Protocol,,,Leuprolide (Lupride Flare),0.05 mg,Subcutaneous,BD,1,12,stim_start,"Diluted microdose flare starting Day 1 of cycle",MAIN
+DRUG_RULE,Poor Responder Microdose Flare Protocol,,,Recombinant FSH + hMG,300 IU,Subcutaneous,OD,2,12,stim_start,"High-dose dual gonadotropin stimulation for maximum recruitment",MAIN
+DRUG_RULE,Poor Responder Microdose Flare Protocol,,,Ovidrel (rhCG),250 mcg,Subcutaneous,STAT,13,13,stim_start,"Stat trigger when 2 or more follicles reach >= 17mm",MAIN

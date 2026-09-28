@@ -1,0 +1,29 @@
+code,name,category,base_price,hsn_sac,gst_rate,branch_code
+OPD-001,Senior Infertility Specialist Consultation,Consultation,1500.00,999312,0.00,MAIN
+OPD-002,Routine Gynec Consultation / Follow-up,Consultation,800.00,999312,0.00,MAIN
+OPD-003,Andrology / Male Fertility Consultation,Consultation,1200.00,999312,0.00,MAIN
+OPD-004,Clinical Diet & Nutrition Counseling,Consultation,600.00,999312,0.00,MAIN
+OPD-005,Fertility Psychological Counseling,Consultation,1500.00,999312,0.00,MAIN
+USG-001,Pelvic Ultrasound TVS (Baseline),Scan,1500.00,999313,0.00,MAIN
+USG-002,Follicular Monitoring Scan (Single Sitting),Scan,800.00,999313,0.00,MAIN
+USG-003,Complete Follicular Tracking Package (6 Scans),Scan,4000.00,999313,0.00,MAIN
+USG-004,Early Pregnancy Viability / Dating Scan,Scan,1800.00,999313,0.00,MAIN
+USG-005,Color Doppler Pelvis / Uterine Artery,Scan,2500.00,999313,0.00,MAIN
+USG-006,3D Pelvic Saline Infusion Sonography (SIS),Scan,3500.00,999313,0.00,MAIN
+AND-001,CASA Semen Analysis (WHO 6th Edition),Lab,1200.00,999315,0.00,MAIN
+AND-002,Sperm DNA Fragmentation Index (DFI),Lab,3500.00,999315,0.00,MAIN
+AND-003,Semen Freezing & Vitrification (1 Year),Lab,8000.00,999315,0.00,MAIN
+LAB-001,Serum AMH (Anti-Mullerian Hormone),Lab,2200.00,999315,0.00,MAIN
+LAB-002,Day 2 Ovarian Reserve Profile (FSH LH E2 TSH PRL),Lab,3500.00,999315,0.00,MAIN
+LAB-003,Couple Viral Markers (HIV HBsAg HCV VDRL),Lab,2800.00,999315,0.00,MAIN
+LAB-004,Complete Blood Count (CBC) with ESR,Lab,450.00,999315,0.00,MAIN
+LAB-005,Serum Beta-hCG Quantitative,Lab,850.00,999315,0.00,MAIN
+PRC-001,Intrauterine Insemination (IUI) Procedure & Prep,Procedure,8500.00,999312,0.00,MAIN
+PRC-002,Diagnostic Hysteroscopy (Daycare),Procedure,18000.00,999312,0.00,MAIN
+PRC-003,Operative Laparoscopy / Ovarian Drilling,Procedure,45000.00,999312,0.00,MAIN
+PRC-004,Cervical Pap Smear & Liquid Based Cytology,Procedure,1200.00,999315,0.00,MAIN
+PRC-005,Ovum Pick-Up (OPU) OT & Consumables Charge,Procedure,45000.00,999312,0.00,MAIN
+PRC-006,Embryo Transfer (ET) Guided Procedure Charge,Procedure,25000.00,999312,0.00,MAIN
+PHR-001,Injection Administration & Nursing Charge,Nursing,200.00,999319,0.00,MAIN
+DAY-001,Daycare Recovery Bed Charge (Up to 4 Hours),Daycare,1500.00,999311,0.00,MAIN
+DAY-002,Deluxe Post-OP Suite Overnight Tariff,Daycare,6500.00,999311,0.00,MAIN

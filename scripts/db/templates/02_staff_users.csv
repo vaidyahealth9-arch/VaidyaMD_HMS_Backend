@@ -1,0 +1,11 @@
+﻿name,email,phone,role,specialization,qualification,reg_number,departments,is_doctor,branch_code,temp_password
+"Dr. Pooja Papishetty",matrikafertilityhyd@gmail.com,+91-7780612539,admin,"Consultant Fertility, Cosmetic Gynaecology and Laparoscopic Surgeon","MBBS, MS (OBG), FRM (Chd), DCG",TSMC/FMR/10576,"[""admin"", ""fertility"", ""opd""]",true,MAIN,ApexPass2026!
+"Dr. Pooja Papishetty",drpooja@matrikafertility.in,+91-7780612539,doctor,"Consultant Fertility, Cosmetic Gynaecology and Laparoscopic Surgeon","MBBS, MS (OBG), FRM (Chd), DCG",TSMC/FMR/10576,"[""fertility"", ""opd""]",true,MAIN,ApexPass2026!
+"Dr. Sai Shiva Tadakamalla",tsaishiva@gmail.com,+91-9490033093,doctor,"Consultant Endoscopic Brain and Spine Surgeon","MBBS (Osm), MS Gen. Surgery (PGIMER), MCh Neurosurgery (PGIMER), Endoscopic Spine Surgery (South Korea), Fellowship - Skull Base Surgery (PGIMER), Fellowship - Neuroendoscopy",TSMC/FMR/05687,"[""fertility"", ""opd""]",true,MAIN,ApexPass2026!
+"Clinical Embryologist",embryology@matrikafertility.in,+91-7780612539,embryologist,"Clinical Embryology & Micromanipulation","M.Sc. Clinical Embryology (Leeds), ESHRE Certified",,"[""ivf_lab""]",false,MAIN,ApexPass2026!
+"Clinical Andrologist",andrology@matrikafertility.in,+91-7780612539,andrologist,"Clinical Andrology & CASA Specialist","PhD Reproductive Biology, M.Sc.",,"[""ivf_lab"", ""lims""]",false,MAIN,ApexPass2026!
+"Priyanka",nursing@matrikafertility.in,+91-7780612539,nurse,"Fertility Nursing & OT Care","B.Sc. Nursing, Certified Fertility Nurse",,"[""fertility"", ""ipd""]",false,MAIN,ApexPass2026!
+"Poshala Radhika",counsellor@matrikafertility.in,+91-7780612539,counsellor,"Reproductive Psychology & ART Counseling","M.Phil Clinical Psychology, Certified ART Counsellor",,"[""counseling""]",false,MAIN,ApexPass2026!
+"Sandeep",pharmacy@gmail.com,+91-7780612539,pharma,"Hospital & Clinical Pharmacy","B.Pharm, Registered Pharmacist",,"[""pharmacy""]",false,MAIN,ApexPass2026!
+"Accounts & Billing Desk",accounts@matrikafertility.in,+91-9490033093,accounts,"Medical Billing & Financial Settlements","B.Com, Certified Healthcare Cashier",,"[""billing""]",false,MAIN,ApexPass2026!
+"Priyanka",reception@matrikafertility.in,+91-7780612539,receptionist,"Patient Experience & Front Desk","BBA Healthcare Management",,"[""reception""]",false,MAIN,ApexPass2026!

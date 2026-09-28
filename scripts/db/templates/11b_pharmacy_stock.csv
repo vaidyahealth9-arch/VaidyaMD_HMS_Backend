@@ -1,0 +1,51 @@
+item_code,item_name,generic_name,category,batch_number,manufacturer,expiry_date,purchase_rate,mrp,selling_price,quantity_received,quantity_available,rack_location,hsn_code,vendor_name,branch_code
+COHB03,HBCOM SACHETS (1X2GM),Iron + Folic Acid + Vitamin B12,Supplements / Hematology,BS260140,Comed Chemicals,2028-05-01,15.60,20.48,20.48,48,48,A003,30045010,Matrika Pharmacy Vendor,MAIN
+SEEV01,EVATONE 2 MG TAB,Estradiol Valerate 2mg,Hormones / Endometrial Prep,PLEV2603,Serum Institute,2028-01-01,122.55,160.85,155.00,30,30,A003,30043919,Matrika Pharmacy Vendor,MAIN
+SEME02,MEPRATE TAB 10MG,Medroxyprogesterone Acetate 10mg,Hormones / Progestins,CUE28AEB,Serum Institute,2028-12-01,53.30,66.62,66.00,30,30,A003,30043919,Matrika Pharmacy Vendor,MAIN
+RXFE01,FERTYL TAB 50MG,Clomiphene Citrate 50mg,Ovulation Induction,AFTL2601,Ar-Ex Laboratories,2030-09-01,71.79,94.20,90.00,5,5,A043,30043919,Matrika Pharmacy Vendor,MAIN
+MIDO02,DOLO 650 TAB,Paracetamol 650mg,Analgesics / Antipyretics,DOBS4440,Micro Labs,2030-03-01,24.59,32.28,32.00,12,12,A059,30049061,Matrika Pharmacy Vendor,MAIN
+ELCH01,CHYMORAL FORTE TAB,Trypsin-Chymotrypsin (100000 AU),Anti-inflammatory / Post-op,DKU626002A,Torrent Pharma,2029-05-31,391.71,514.12,495.00,10,10,B005,30049084,Matrika Pharmacy Vendor,MAIN
+NORE01,REGESTRONE TAB 5MG,Norethisterone 5mg,Progestins / Bleeding Control,DAFG0033,Torrent Pharma,2029-03-31,44.09,57.87,55.00,10,10,B050,30043919,Matrika Pharmacy Vendor,MAIN
+UNCO05,COQ CAP 100MG,Coenzyme Q10 100mg,Fertility Antioxidants,COQ26002GJ,Universal Nutriscience,2028-11-01,452.57,594.00,570.00,9,9,B072,30045090,Matrika Pharmacy Vendor,MAIN
+LEFO01,FOLVITE TAB 5MG,Folic Acid 5mg,Prenatal Vitamins,RN0620,Pfizer India,2027-12-01,59.97,73.05,70.00,32,32,B112,30045039,Matrika Pharmacy Vendor,MAIN
+GEDI01,DIANE 35 TAB,Cyproterone Acetate 2mg + Ethinylestradiol 0.035mg,PCOS / Anti-androgen,KT10493,Bayer Healthcare,2028-06-01,366.76,458.45,440.00,1,1,B134,30049099,Matrika Pharmacy Vendor,MAIN
+HELE02,LEVOCET M TAB,Levocetirizine 5mg + Montelukast 10mg,Antihistamines / Allergy,2GT26361B,Hetero Healthcare,2029-03-01,85.33,112.00,105.00,18,18,B142,30049039,Matrika Pharmacy Vendor,MAIN
+IPZE04,ZERODOL MR TAB,Aceclofenac 100mg + Tizanidine 2mg,Muscle Relaxant / Pain,GGG0426005BH,Ipca Laboratories,2029-04-01,97.52,128.00,120.00,10,10,B163,30049069,Matrika Pharmacy Vendor,MAIN
+GEPR02,PROLUTON DEPOT 250MG INJ,Hydroxyprogesterone Caproate 250mg,Injectable Progestins,GB0596B,Zydus Healthcare,2030-03-03,218.66,287.00,280.00,12,12,C094,30043190,Matrika Pharmacy Vendor,MAIN
+MENE08,NEUROBION FORTE TAB,Vitamin B Complex + B12,Neurotropic Vitamins,6205C84301,Procter & Gamble / Merck,2027-12-01,38.02,47.53,45.00,30,30,C130,300490,Matrika Pharmacy Vendor,MAIN
+EMEV05,EVION LC TAB,Levocarnitine 150mg + Vitamin E 400mg,Male / Female Antioxidants,6163C82303,Procter & Gamble Health,2027-11-01,54.09,70.98,68.00,15,15,C135,30045037,Matrika Pharmacy Vendor,MAIN
+EMLI02,LIVOGEN Z TAB,Ferrous Fumarate + Folic Acid + Zinc,Hematinics / Iron,6175C84207,Procter & Gamble Health,2027-11-01,82.98,108.92,100.00,30,30,C136,300490,Matrika Pharmacy Vendor,MAIN
+MANU12,NUROKIND LC TAB,L-Carnitine + Mecobalamin + Folic Acid,Male Fertility Booster,B95Z081,Mankind Pharma,2028-05-01,183.54,262.80,250.00,15,15,D041,30049099,Matrika Pharmacy Vendor,MAIN
+ORFE03,FEMILON TAB,Desogestrel 0.15mg + Ethinylestradiol 0.02mg,Oral Contraceptives / OCP,D138464,Abbott India,2028-11-01,317.60,397.00,385.00,30,30,D149,30066010,Matrika Pharmacy Vendor,MAIN
+ORNO01,NOVELON TAB,Desogestrel 0.15mg + Ethinylestradiol 0.03mg,Oral Contraceptives / OCP,D142066,Abbott India,2029-01-01,277.60,347.00,335.00,30,30,D149,30066010,Matrika Pharmacy Vendor,MAIN
+BOGL01,GLUFORMIN 500 TAB,Metformin Hydrochloride 500mg SR,PCOS / Insulin Sensitizers,SLL0140,Abbott Diabetes,2027-10-31,15.06,19.76,19.00,15,15,D169,300490,Matrika Pharmacy Vendor,MAIN
+SODU02,DUPHASTON TAB 10MG,Dydrogesterone 10mg,Luteal Support,MAW26022,Abbott Women's Health,2029-06-01,687.10,901.82,880.00,12,12,D210,30043919,Matrika Pharmacy Vendor,MAIN
+SUSU01,SUSTEN 100MG CAP,Natural Micronized Progesterone 100mg,Luteal Support,GTH2354A,Sun Pharma,2028-06-30,161.52,212.00,205.00,5,5,E006,30043919,Matrika Pharmacy Vendor,MAIN
+SUTR06,TRAPIC MF TAB,Tranexamic Acid 500mg + Mefenamic Acid 250mg,Menorrhagia / Hemostatics,GTH2543A,Sun Pharma,2028-07-31,356.57,468.00,450.00,4,4,E010,30049099,Matrika Pharmacy Vendor,MAIN
+SUFE03,FERTISURE F TAB,Myo-Inositol + Astaxanthin + CoQ10 + L-Arginine,Oocyte Quality / Supplements,SIH1353A,Sun Pharma,2028-01-31,238.48,313.00,300.00,15,15,E040,21069099,Matrika Pharmacy Vendor,MAIN
+MOTR01,TRENAXA 500MG TAB,Tranexamic Acid 500mg,Hemostatics / Bleeding Control,26260070A,Macleods Pharma,2029-05-01,151.84,199.29,190.00,10,10,E145,30049099,Matrika Pharmacy Vendor,MAIN
+MIDO20,DOLO 500MG TAB,Paracetamol 500mg,Analgesics / Antipyretics,DFNY0192,Micro Labs,2030-04-01,11.85,14.18,14.00,10,10,J001,30049099,Matrika Pharmacy Vendor,MAIN
+CIP184,CIP-ZOX TAB,Chlorzoxazone 500mg + Paracetamol 325mg,Muscle Relaxant / Pain,AMQ08BDB,Cipla Ltd,2028-04-01,25.48,138.50,125.00,10,10,J045,30049069,Matrika Pharmacy Vendor,MAIN
+MED-LET-019,LETROZ 2.5MG TAB,Letrozole 2.5mg,Ovulation Induction,LTZ26A11,Sun Pharma,2028-08-31,95.00,185.00,175.00,50,50,A043,30049099,Matrika Pharmacy Vendor,MAIN
+MED-GON-001,GONAL-F 450 IU PEN,Recombinant Human FSH 450 IU,Gonadotropins / IVF Stim,GNF26A01,Merck Serono,2027-08-31,5500.00,7800.00,7500.00,100,100,FRIDGE-A1,3004,Merck Healthcare Distribution,MAIN
+MED-MEN-002,MENOPUR 75 IU INJ,Highly Purified hMG 75 IU,Gonadotropins / IVF Stim,MNP26B12,Ferring Pharmaceuticals,2027-06-30,850.00,1350.00,1280.00,200,200,FRIDGE-A2,3004,Ferring Pharmaceuticals India,MAIN
+MED-CET-003,CETROTIDE 0.25MG INJ,Cetrorelix Acetate 0.25mg,GnRH Antagonist,CTR26C05,Merck Serono,2027-10-31,1400.00,2100.00,1990.00,150,150,FRIDGE-A3,3004,Merck Healthcare Distribution,MAIN
+MED-OVI-004,OVIDREL 250MCG PFS,Choriogonadotropin Alfa 250mcg,Trigger Injection,OVD26D19,Merck Serono,2027-12-31,1800.00,2700.00,2550.00,80,80,FRIDGE-A4,3004,Merck Healthcare Distribution,MAIN
+MED-DEC-005,DECAPEPTYL 0.1MG INJ,Triptorelin Acetate 0.1mg,GnRH Agonist Trigger,DCP26E07,Ferring Pharmaceuticals,2027-09-30,620.00,950.00,900.00,120,120,FRIDGE-A5,3004,Ferring Pharmaceuticals India,MAIN
+MED-SUS-007,SUSTEN 400MG VAGINAL TAB,Natural Micronized Progesterone 400mg,Luteal Support,SST26F99,Sun Pharma,2028-04-30,450.00,680.00,650.00,300,300,RACK-B1,3004,Sun Pharma,MAIN
+MED-AUG-010,AUGMENTIN 625 DUO TAB,Amoxicillin 500mg + Clavulanic Acid 125mg,Antibiotics,AUG26H90,GSK India,2027-05-31,120.00,210.00,195.00,400,400,RACK-C1,3004,Zuellig Pharma India Pvt Ltd,MAIN
+MED-PAN-020,PAN-D CAP,Pantoprazole 40mg + Domperidone 30mg SR,Gastroprotection / Antacid,PND26P12,Alkem Laboratories,2028-07-31,110.00,198.00,185.00,300,300,RACK-C2,3004,Zuellig Pharma India Pvt Ltd,MAIN
+MED-MEF-021,MEFTAL-SPAS TAB,Mefenamic Acid 250mg + Dicyclomine 10mg,Antispasmodic / Dysmenorrhea,MFT26S44,Blue Cross Laboratories,2028-09-30,35.00,58.00,55.00,250,250,RACK-C3,3004,Zuellig Pharma India Pvt Ltd,MAIN
+MED-AZI-011,AZITHRAL 500MG TAB,Azithromycin 500mg,Antibiotics,AZT26J45,Alembic Pharmaceuticals,2028-01-31,75.00,135.00,125.00,300,300,RACK-C2,3004,Zuellig Pharma India Pvt Ltd,MAIN
+MED-DOX-022,DOXY-1 100MG CAP,Doxycycline 100mg,Antibiotics / Post-HSG,DXY26D08,USV Pvt Ltd,2028-05-31,45.00,85.00,80.00,200,200,RACK-C3,3004,Zuellig Pharma India Pvt Ltd,MAIN
+MED-SHL-023,SHELCAL 500 TAB,Calcium Carbonate 500mg + Vitamin D3 250 IU,Calcium Supplements,SHL26C55,Torrent Pharma,2028-03-31,72.00,131.00,125.00,400,400,RACK-D1,3004,Torrent Pharma,MAIN
+MED-CLX-024,CLEXANE 40MG INJ,Enoxaparin Sodium 40mg (0.4ml),Anticoagulants / LMWH,CLX26E19,Sanofi India,2027-11-30,380.00,560.00,540.00,100,100,FRIDGE-A5,3004,Zuellig Pharma India Pvt Ltd,MAIN
+MED-ASP-013,ECOSPRIN 75MG TAB,Aspirin Enteric Coated 75mg,Vascular Support,ECP26L22,USV Pvt Ltd,2028-04-30,8.00,18.00,16.00,800,800,RACK-D2,3004,Zuellig Pharma India Pvt Ltd,MAIN
+MED-CAB-014,CABERLIN 0.5MG TAB,Cabergoline 0.5mg,OHSS Prophylaxis,CBR26M66,Sun Pharma,2028-02-28,180.00,290.00,275.00,150,150,RACK-B3,3004,Sun Pharma,MAIN
+MED-MTZ-025,FLAGYL 400MG TAB,Metronidazole 400mg,Antibiotics / Anaerobic,FLG26M01,Abbott India,2028-06-30,22.00,38.50,36.00,300,300,RACK-C4,3004,Abbott India,MAIN
+MED-CAN-026,CANDID V6 VAGINAL TAB,Clotrimazole 100mg Vaginal Tab,Antifungal / Vaginal Candidiasis,CND26V02,Glenmark Pharmaceuticals,2028-03-31,65.00,105.00,98.00,150,150,RACK-C4,3004,Glenmark Pharmaceuticals,MAIN
+MED-CIP-027,CIPLOX 500MG TAB,Ciprofloxacin 500mg,Antibiotics / Fluoroquinolones,CPX26C03,Cipla Ltd,2028-05-31,38.00,62.00,58.00,250,250,RACK-C5,3004,Cipla Ltd,MAIN
+MED-THY-028,THYRONORM 50MCG TAB,Thyroxine Sodium 50mcg,Thyroid Hormone / TSH Optimization,THY26T04,Abbott India,2028-10-31,115.00,165.00,155.00,200,200,RACK-D3,3004,Abbott India,MAIN
+MED-VD3-029,CALCIROL 60000 IU SACHET,Cholecalciferol (Vitamin D3) 60000 IU,Vitamin D3 / Mineralization,CLC26D05,Cadila Pharmaceuticals,2028-08-31,32.00,55.00,50.00,300,300,RACK-D4,3004,Cadila Pharmaceuticals,MAIN
+MED-EMS-030,EMESET 4MG TAB,Ondansetron 4mg,Antiemetic / Nausea & Vomiting,EMS26E06,Cipla Ltd,2028-09-30,35.00,58.00,55.00,200,200,RACK-A6,3004,Cipla Ltd,MAIN
+MED-VOV-031,VOVERAN 50MG TAB,Diclofenac Sodium 50mg,NSAID / Analgesic,VOV26V07,Novartis India,2028-04-30,42.00,75.00,70.00,250,250,RACK-A7,3004,Novartis India,MAIN

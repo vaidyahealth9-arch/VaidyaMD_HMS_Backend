@@ -1,0 +1,5 @@
+tank_code,tank_name,tank_type,capacity_litres,location,canister_count,canister_colours_json,supported_device_types,branch_code
+TANK-01,"Tank 1 — Main Autologous Embryo Bank (Auto LN2)",Autologous Embryos,47,"IVF Cleanroom Cryo Suite A",6,"[""Red"", ""Blue"", ""Green"", ""Yellow"", ""White"", ""Orange""]","Cryotop, CryoLock, CBS Straw",MAIN
+TANK-02,"Tank 2 — Autologous Sperm & TESA Vitrification Bank",Autologous Gametes,35,"IVF Cleanroom Cryo Suite A",6,"[""Red"", ""Blue"", ""Green"", ""Yellow"", ""White"", ""Orange""]","CryoVial, CBS Straw",MAIN
+TANK-03,"Tank 3 — Certified ART Donor Gamete Bank (Lockable)",Donor Gametes,35,"Cryobank Vault Room B",6,"[""Red"", ""Blue"", ""Green"", ""Yellow"", ""White"", ""Orange""]","Cryotop, CryoVial",MAIN
+TANK-04,"Tank 4 — Viral Reactive / Quarantine Cryobank",Quarantine / Infectious,20,"Isolation Cryo Suite C",4,"[""Red"", ""Blue"", ""Green"", ""Yellow""]","High Security CBS Straw",MAIN
