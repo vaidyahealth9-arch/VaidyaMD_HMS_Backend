@@ -59,11 +59,18 @@ async def dispense_fefo(
 async def list_inventory_batches(
     category: Optional[str] = None,
     search: Optional[str] = None,
+    active_only: Optional[bool] = Query(None, description="Filter only active batches (True) or all (False)"),
     branch_id: Optional[UUID] = Depends(get_branch_context),
     current_user: User = Depends(get_current_user),
     service: PharmacyService = Depends(get_pharmacy_service)
 ):
-    return await service.list_inventory_batches(category, search, tenant_id=current_user.tenant_id, branch_id=branch_id)
+    return await service.list_inventory_batches(
+        category=category,
+        search=search,
+        tenant_id=current_user.tenant_id,
+        branch_id=branch_id,
+        active_only=bool(active_only),
+    )
 
 @router.post("/batches", status_code=201)
 @router.post("/batches/", status_code=201, include_in_schema=False)
@@ -91,12 +98,13 @@ async def update_inventory_batch(
 @router.delete("/batches/{batch_id}")
 async def delete_inventory_batch(
     batch_id: UUID,
+    deactivate_all: bool = Query(False, description="Also deactivate all other batches matching this item code"),
     current_user: User = Depends(get_current_user),
     service: PharmacyService = Depends(get_pharmacy_service)
 ):
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Tenant context required to delete batch")
-    return await service.delete_batch(batch_id, tenant_id=current_user.tenant_id)
+    return await service.delete_batch(batch_id, tenant_id=current_user.tenant_id, deactivate_all_batches=deactivate_all)
 
 @router.get("/indents")
 @router.get("/indents/", include_in_schema=False)

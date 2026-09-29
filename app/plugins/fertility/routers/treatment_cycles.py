@@ -692,6 +692,7 @@ async def get_cycle_medication_calendar(cycle_id: UUID, db: AsyncSession = Depen
         rules=rules_data,
         sentinel_dates=cycle.sentinel_dates or {},
         total_days=21,
+        treatment_type=cycle.treatment_type,
     )
     calendar["cycle_id"] = cycle.cycle_id
     calendar["treatment_type"] = cycle.treatment_type

@@ -88,3 +88,18 @@ async def update_clinical_record(
     await db.flush()
     await db.refresh(record)
     return record
+
+
+@router.delete("/{record_id}")
+async def delete_clinical_record(
+    record_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a clinical record."""
+    record = await db.get(ClinicalRecord, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    await db.delete(record)
+    await db.flush()
+    return {"status": "success", "message": "Clinical record deleted successfully"}

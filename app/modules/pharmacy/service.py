@@ -25,7 +25,14 @@ class PharmacyService:
 
 
 
-    async def list_inventory_batches(self, category: str = None, search: str = None, tenant_id: UUID = None, branch_id: UUID = None):
+    async def list_inventory_batches(
+        self,
+        category: str = None,
+        search: str = None,
+        tenant_id: UUID = None,
+        branch_id: UUID = None,
+        active_only: bool = False,
+    ):
         query = select(InventoryBatch).order_by(InventoryBatch.expiry_date.asc())
         if tenant_id:
             query = query.where(InventoryBatch.tenant_id == tenant_id)
@@ -33,11 +40,13 @@ class PharmacyService:
             query = query.where(InventoryBatch.branch_id == branch_id)
         if category:
             query = query.where(InventoryBatch.category == category)
+        if active_only:
+            query = query.where(InventoryBatch.is_active == True)
         res = await self.db.execute(query)
         batches = res.scalars().all()
         if search:
             s = search.lower()
-            batches = [b for b in batches if s in b.item_name.lower() or s in (b.generic_name or "").lower() or s in b.batch_number.lower()]
+            batches = [b for b in batches if s in b.item_name.lower() or s in (b.generic_name or "").lower() or s in b.batch_number.lower() or s in (b.item_code or "").lower()]
         return batches
 
     async def dispense_fefo(self, payload: DispenseRequest, current_user=None):
@@ -81,6 +90,18 @@ class PharmacyService:
             available_batches = res.scalars().all()
 
             if not available_batches:
+                # Check if inactive batches exist for this item code
+                inactive_q = select(InventoryBatch).where(
+                    InventoryBatch.tenant_id == tenant_id,
+                    InventoryBatch.item_code == item.item_code,
+                )
+                if branch_id:
+                    inactive_q = inactive_q.where(InventoryBatch.branch_id == branch_id)
+                res_inact = await self.db.execute(inactive_q)
+                inact_batches = res_inact.scalars().all()
+                if inact_batches and all(not b.is_active for b in inact_batches):
+                    med_name = inact_batches[0].item_name or item.item_code
+                    raise ValueError(f"Cannot dispense '{med_name}' ({item.item_code}): This medication is currently marked as INACTIVE in Pharmacy Masters.")
                 raise ValueError(f"Out of stock for item code {item.item_code}")
 
             total_stock = sum(b.quantity_available for b in available_batches)
@@ -569,11 +590,20 @@ class PharmacyService:
         await self.db.refresh(batch)
         return batch
 
-    async def delete_batch(self, batch_id: UUID, tenant_id: UUID) -> dict:
+    async def delete_batch(self, batch_id: UUID, tenant_id: UUID, deactivate_all_batches: bool = False) -> dict:
         batch = await self.db.get(InventoryBatch, batch_id)
         if not batch or batch.tenant_id != tenant_id:
             raise HTTPException(status_code=404, detail="Inventory batch not found")
         batch.is_active = False
+
+        if deactivate_all_batches and batch.item_code:
+            from sqlalchemy import update
+            await self.db.execute(
+                update(InventoryBatch)
+                .where(InventoryBatch.tenant_id == tenant_id, InventoryBatch.item_code == batch.item_code)
+                .values(is_active=False)
+            )
+
         await self.db.commit()
         return {"status": "success", "message": "Inventory batch deactivated successfully"}
 
