@@ -142,6 +142,25 @@ def generate_hrt_fet_calendar(
                 embryo_tag = ""
                 notes = "Maintain luteal phase estradiol and progesterone support"
 
+        # Determine milestone tag for FET calendar
+        fet_milestone = ""
+        if cycle_day == 1:
+            fet_milestone = "Day 1 (HRT Start)"
+        elif cycle_day == 12:
+            fet_milestone = "D12 Endometrial Scan"
+        elif cycle_day == 13:
+            fet_milestone = "Endometrium Assessment"
+        elif p_offset == 0:
+            fet_milestone = "P0 (Progesterone Start)"
+        elif p_offset == 3 and is_day3:
+            fet_milestone = "Day-3 Embryo Transfer 👶"
+        elif p_offset == 5 and not is_day3:
+            fet_milestone = "Day-5 Blastocyst Transfer 👶"
+        elif cycle_day == total_days:
+            fet_milestone = "Beta-hCG Pregnancy Test 🩸"
+        else:
+            fet_milestone = phase if "Transfer" in phase or "P0" in phase else ""
+
         days.append({
             "cycle_day": cycle_day,
             "day_number": cycle_day,
@@ -150,6 +169,8 @@ def generate_hrt_fet_calendar(
             "day_of_week": cur_date.strftime("%A"),
             "estrogen_day": estrogen_day_val,
             "phase": phase,
+            "milestone": fet_milestone,
+            "stim_day_label": f"HRT Day {cycle_day}" if not is_p0_or_after else (f"P0" if p_offset == 0 else f"P+{p_offset}"),
             "medication": med_name,
             "dose": med_dose,
             "unit": "mg",
@@ -194,12 +215,19 @@ def generate_medication_calendar(
     rules: list[dict[str, Any]],
     sentinel_dates: dict[str, Any],
     total_days: int = 21,
+    treatment_type: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Generate a calendar grid where each item represents a calendar day.
     Checks if FET protocol is indicated, delegating to generate_hrt_fet_calendar.
     """
-    if sentinel_dates.get("protocol_category") == "fet" or sentinel_dates.get("p0_date") or sentinel_dates.get("is_hrt_fet"):
+    is_fet = (
+        sentinel_dates.get("protocol_category") == "fet" or
+        sentinel_dates.get("p0_date") or
+        sentinel_dates.get("is_hrt_fet") or
+        "FET" in str(treatment_type or "").upper()
+    )
+    if is_fet:
         return generate_hrt_fet_calendar(sentinel_dates, total_days=max(23, total_days))
 
     lmp = parse_date(sentinel_dates.get("lmp_day1"))
@@ -208,15 +236,23 @@ def generate_medication_calendar(
     opu = parse_date(sentinel_dates.get("opu"))
     et = parse_date(sentinel_dates.get("et"))
     baseline = parse_date(sentinel_dates.get("baseline_scan"))
+    d12_scan = parse_date(sentinel_dates.get("d12_scan"))
+    p0_date = parse_date(sentinel_dates.get("p0_date"))
+    beta_hcg = parse_date(sentinel_dates.get("beta_hcg_date"))
+    insemination = parse_date(sentinel_dates.get("insemination"))
 
     anchor_base = stim_start or lmp or baseline or date.today()
 
     max_date = anchor_base + timedelta(days=total_days - 1)
     if et and et > max_date:
         max_date = et + timedelta(days=2)
+    if beta_hcg and beta_hcg > max_date:
+        max_date = beta_hcg + timedelta(days=1)
 
     num_days = max(14, (max_date - anchor_base).days + 1)
     calendar_days: list[dict[str, Any]] = []
+
+    is_iui = "IUI" in str(treatment_type or "").upper() or "OI" in str(treatment_type or "").upper()
 
     milestone_map = {}
     if lmp:
@@ -225,21 +261,40 @@ def generate_medication_calendar(
         milestone_map[baseline] = "Baseline Scan"
     if stim_start:
         milestone_map[stim_start] = "Stimulation Start"
+    if d12_scan:
+        milestone_map[d12_scan] = "D12 Endometrial Scan"
+    if p0_date:
+        milestone_map[p0_date] = "P0 (Progesterone Start)"
     if trigger:
         milestone_map[trigger] = "Trigger Day ⚡"
-    if opu:
-        milestone_map[opu] = "OPU / Retrieval 🧫"
-    if et:
-        milestone_map[et] = "Embryo Transfer 👶"
+    if is_iui:
+        if insemination:
+            milestone_map[insemination] = "IUI Insemination 💉"
+        elif opu:
+            milestone_map[opu] = "IUI Insemination 💉"
+    else:
+        if opu:
+            milestone_map[opu] = "OPU / Retrieval 🧫"
+        if et:
+            milestone_map[et] = "Embryo Transfer 👶"
+    if beta_hcg:
+        milestone_map[beta_hcg] = "Beta-hCG Pregnancy Test 🩸"
 
     for day_idx in range(num_days):
         current_date = anchor_base + timedelta(days=day_idx)
         milestone = milestone_map.get(current_date, "")
         
         stim_day_label = ""
-        if stim_start and current_date >= stim_start:
+        if is_iui:
+            stim_day_label = f"Cycle Day {day_idx + 1}"
+        elif stim_start and current_date >= stim_start:
             s_day = (current_date - stim_start).days + 1
             stim_day_label = f"Stim Day {s_day}"
+        elif lmp and current_date >= lmp:
+            c_day = (current_date - lmp).days + 1
+            stim_day_label = f"Cycle Day {c_day}"
+        else:
+            stim_day_label = f"Day {day_idx + 1}"
 
         day_meds = []
         for rule in rules:
@@ -260,6 +315,27 @@ def generate_medication_calendar(
                     "frequency": rule.get("frequency", "OD"),
                     "instructions": rule.get("instructions", ""),
                 })
+
+        # Smart clinical fallback when no protocol rules exist in database
+        if not day_meds and not rules:
+            if is_iui:
+                if 1 <= day_idx <= 5:  # Days 2 to 6
+                    day_meds.append({"drug_name": "Tab Letrozole (Femara 2.5mg)", "dose": "2.5 mg", "route": "PO", "frequency": "OD", "instructions": "Take at bedtime"})
+                if trigger and current_date == trigger:
+                    day_meds.append({"drug_name": "Inj hCG (Ovitrelle 250mcg)", "dose": "250 mcg", "route": "SC", "frequency": "Stat", "instructions": "Subcutaneous trigger"})
+                if insemination and current_date > insemination and (current_date - insemination).days <= 14:
+                    day_meds.append({"drug_name": "Micronized Progesterone (Susten 200mg)", "dose": "200 mg", "route": "PV", "frequency": "BD", "instructions": "Luteal phase support"})
+            else:
+                if stim_start and current_date >= stim_start:
+                    s_day = (current_date - stim_start).days + 1
+                    if 1 <= s_day <= 10:
+                        day_meds.append({"drug_name": "Rec-FSH (Gonal-F / Puregon)", "dose": "225 IU", "route": "SC", "frequency": "OD Evening", "instructions": "Inject subcutaneously"})
+                    if 6 <= s_day <= 10:
+                        day_meds.append({"drug_name": "GnRH Antagonist (Cetrotide 0.25mg)", "dose": "0.25 mg", "route": "SC", "frequency": "OD Morning", "instructions": "Inject subcutaneously"})
+                    if trigger and current_date == trigger:
+                        day_meds.append({"drug_name": "Ovulation Trigger (Ovitrelle 250mcg)", "dose": "250 mcg", "route": "SC", "frequency": "Stat Night", "instructions": "Precise timing required"})
+                    if opu and current_date > opu and (current_date - opu).days <= 14:
+                        day_meds.append({"drug_name": "Micronized Progesterone (Susten 400mg)", "dose": "400 mg", "route": "PV", "frequency": "BD", "instructions": "Luteal support"})
 
         calendar_days.append({
             "date": current_date.isoformat(),
