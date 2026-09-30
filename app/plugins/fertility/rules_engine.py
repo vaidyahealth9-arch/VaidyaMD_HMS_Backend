@@ -216,10 +216,13 @@ def generate_medication_calendar(
     sentinel_dates: dict[str, Any],
     total_days: int = 21,
     treatment_type: Optional[str] = None,
+    timeline_events: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """
     Generate a calendar grid where each item represents a calendar day.
     Checks if FET protocol is indicated, delegating to generate_hrt_fet_calendar.
+    Supports multi-track timeline events (scans, investigations, procedures)
+    and prior-cycle downregulation offsets (e.g. Day 21 prior cycle = Day -7).
     """
     is_fet = (
         sentinel_dates.get("protocol_category") == "fet" or
@@ -227,7 +230,7 @@ def generate_medication_calendar(
         sentinel_dates.get("is_hrt_fet") or
         "FET" in str(treatment_type or "").upper()
     )
-    if is_fet:
+    if is_fet and not rules:
         return generate_hrt_fet_calendar(sentinel_dates, total_days=max(23, total_days))
 
     lmp = parse_date(sentinel_dates.get("lmp_day1"))
@@ -243,15 +246,25 @@ def generate_medication_calendar(
 
     anchor_base = stim_start or lmp or baseline or date.today()
 
-    max_date = anchor_base + timedelta(days=total_days - 1)
-    if et and et > max_date:
-        max_date = et + timedelta(days=2)
-    if beta_hcg and beta_hcg > max_date:
-        max_date = beta_hcg + timedelta(days=1)
+    # Determine timeline span considering possible negative offsets (e.g. Long Agonist D21 of prior cycle = -7)
+    rule_starts = [int(r.get("day_start_offset", 1)) for r in rules] if rules else [1]
+    event_starts = [int(e.get("day_offset", 1)) for e in (timeline_events or [])] if timeline_events else [1]
+    min_offset = min(rule_starts + event_starts + [1])
+    
+    rule_ends = [int(r.get("day_end_offset", total_days)) for r in rules] if rules else [total_days]
+    event_ends = [int(e.get("day_offset", total_days)) for e in (timeline_events or [])] if timeline_events else [total_days]
+    max_offset = max(rule_ends + event_ends + [total_days, 14])
 
-    num_days = max(14, (max_date - anchor_base).days + 1)
+    # Date boundaries
+    cycle_start_date = anchor_base + timedelta(days=min_offset - 1 if min_offset <= 0 else 0)
+    cycle_end_date = anchor_base + timedelta(days=max_offset - 1)
+
+    if et and et > cycle_end_date:
+        cycle_end_date = et + timedelta(days=2)
+    if beta_hcg and beta_hcg > cycle_end_date:
+        cycle_end_date = beta_hcg + timedelta(days=1)
+
     calendar_days: list[dict[str, Any]] = []
-
     is_iui = "IUI" in str(treatment_type or "").upper() or "OI" in str(treatment_type or "").upper()
 
     milestone_map = {}
@@ -280,13 +293,41 @@ def generate_medication_calendar(
     if beta_hcg:
         milestone_map[beta_hcg] = "Beta-hCG Pregnancy Test 🩸"
 
-    for day_idx in range(num_days):
-        current_date = anchor_base + timedelta(days=day_idx)
-        milestone = milestone_map.get(current_date, "")
+    # Map timeline events by day offset
+    events_by_offset: dict[int, list[dict[str, Any]]] = {}
+    for ev in (timeline_events or []):
+        off = int(ev.get("day_offset", 1))
+        events_by_offset.setdefault(off, []).append(ev)
+
+    current_date = cycle_start_date
+    day_counter = 1
+
+    while current_date <= cycle_end_date:
+        # Calculate offset relative to anchor_base
+        offset_from_anchor = (current_date - anchor_base).days + 1
         
-        stim_day_label = ""
-        if is_iui:
-            stim_day_label = f"Cycle Day {day_idx + 1}"
+        # Scans, investigations, and procedures for this day
+        day_events = events_by_offset.get(offset_from_anchor, [])
+        scans = [e.get("title") for e in day_events if e.get("type") == "scan"]
+        investigations = [e.get("title") for e in day_events if e.get("type") == "investigation"]
+        procedures = [e.get("title") for e in day_events if e.get("type") == "procedure"]
+
+        # Milestone precedence
+        milestone = milestone_map.get(current_date, "")
+        if not milestone:
+            if procedures:
+                milestone = f"{procedures[0]} 🧫"
+            elif scans:
+                milestone = f"{scans[0]} 🔍"
+            elif investigations and "Beta" in investigations[0]:
+                milestone = f"{investigations[0]} 🩸"
+
+        # Day Labeling
+        if offset_from_anchor <= 0:
+            prior_cycle_day = 28 + offset_from_anchor
+            stim_day_label = f"Prior Cycle D{prior_cycle_day}"
+        elif is_iui:
+            stim_day_label = f"Cycle Day {offset_from_anchor}"
         elif stim_start and current_date >= stim_start:
             s_day = (current_date - stim_start).days + 1
             stim_day_label = f"Stim Day {s_day}"
@@ -294,8 +335,9 @@ def generate_medication_calendar(
             c_day = (current_date - lmp).days + 1
             stim_day_label = f"Cycle Day {c_day}"
         else:
-            stim_day_label = f"Day {day_idx + 1}"
+            stim_day_label = f"Day {offset_from_anchor}"
 
+        # Match active drugs
         day_meds = []
         for rule in rules:
             anchor_key = rule.get("sentinel_anchor", "stim_start")
@@ -304,8 +346,8 @@ def generate_medication_calendar(
             start_offset = int(rule.get("day_start_offset", 1))
             end_offset = int(rule.get("day_end_offset", 10))
 
-            rule_start_date = anchor_date + timedelta(days=start_offset - 1)
-            rule_end_date = anchor_date + timedelta(days=end_offset - 1)
+            rule_start_date = anchor_date + timedelta(days=start_offset - 1 if start_offset > 0 else start_offset)
+            rule_end_date = anchor_date + timedelta(days=end_offset - 1 if end_offset > 0 else end_offset)
 
             if rule_start_date <= current_date <= rule_end_date:
                 day_meds.append({
@@ -316,15 +358,13 @@ def generate_medication_calendar(
                     "instructions": rule.get("instructions", ""),
                 })
 
-        # Smart clinical fallback when no protocol rules exist in database
+        # Smart fallback if no rules
         if not day_meds and not rules:
             if is_iui:
-                if 1 <= day_idx <= 5:  # Days 2 to 6
+                if 1 <= offset_from_anchor <= 5:
                     day_meds.append({"drug_name": "Tab Letrozole (Femara 2.5mg)", "dose": "2.5 mg", "route": "PO", "frequency": "OD", "instructions": "Take at bedtime"})
                 if trigger and current_date == trigger:
                     day_meds.append({"drug_name": "Inj hCG (Ovitrelle 250mcg)", "dose": "250 mcg", "route": "SC", "frequency": "Stat", "instructions": "Subcutaneous trigger"})
-                if insemination and current_date > insemination and (current_date - insemination).days <= 14:
-                    day_meds.append({"drug_name": "Micronized Progesterone (Susten 200mg)", "dose": "200 mg", "route": "PV", "frequency": "BD", "instructions": "Luteal phase support"})
             else:
                 if stim_start and current_date >= stim_start:
                     s_day = (current_date - stim_start).days + 1
@@ -332,24 +372,27 @@ def generate_medication_calendar(
                         day_meds.append({"drug_name": "Rec-FSH (Gonal-F / Puregon)", "dose": "225 IU", "route": "SC", "frequency": "OD Evening", "instructions": "Inject subcutaneously"})
                     if 6 <= s_day <= 10:
                         day_meds.append({"drug_name": "GnRH Antagonist (Cetrotide 0.25mg)", "dose": "0.25 mg", "route": "SC", "frequency": "OD Morning", "instructions": "Inject subcutaneously"})
-                    if trigger and current_date == trigger:
-                        day_meds.append({"drug_name": "Ovulation Trigger (Ovitrelle 250mcg)", "dose": "250 mcg", "route": "SC", "frequency": "Stat Night", "instructions": "Precise timing required"})
-                    if opu and current_date > opu and (current_date - opu).days <= 14:
-                        day_meds.append({"drug_name": "Micronized Progesterone (Susten 400mg)", "dose": "400 mg", "route": "PV", "frequency": "BD", "instructions": "Luteal support"})
 
         calendar_days.append({
             "date": current_date.isoformat(),
-            "day_number": day_idx + 1,
+            "day_number": day_counter,
+            "cycle_day_offset": offset_from_anchor,
             "day_of_week": current_date.strftime("%A"),
             "display_date": current_date.strftime("%d %b %Y"),
             "milestone": milestone,
             "stim_day_label": stim_day_label,
             "medications": day_meds,
+            "scans": scans,
+            "investigations": investigations,
+            "procedures": procedures,
         })
 
+        current_date += timedelta(days=1)
+        day_counter += 1
+
     return {
-        "start_date": anchor_base.isoformat(),
-        "end_date": max_date.isoformat(),
+        "start_date": cycle_start_date.isoformat(),
+        "end_date": cycle_end_date.isoformat(),
         "total_days": len(calendar_days),
         "days": calendar_days,
     }

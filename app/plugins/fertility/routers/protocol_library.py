@@ -33,6 +33,7 @@ class ProtocolCreate(BaseModel):
     description: Optional[str] = None
     category: str = "stimulation"
     rules: Optional[List[RuleCreate]] = []
+    timeline_events: Optional[List[dict]] = []
     created_by: UUID
 
 
@@ -43,9 +44,15 @@ class CalendarPreviewRequest(BaseModel):
 
 
 @router.get("/")
-async def list_protocols(category: Optional[str] = None, db: AsyncSession = Depends(get_db)):
-    """List all protocol templates with their drug rules."""
-    query = select(ProtocolTemplate).where(ProtocolTemplate.is_active == True).order_by(ProtocolTemplate.name)
+async def list_protocols(
+    category: Optional[str] = None,
+    include_inactive: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """List all protocol templates with their drug rules and timeline events."""
+    query = select(ProtocolTemplate).order_by(ProtocolTemplate.name)
+    if not include_inactive:
+        query = query.where(ProtocolTemplate.is_active == True)
     if category:
         query = query.where(ProtocolTemplate.category == category)
 
@@ -65,6 +72,7 @@ async def list_protocols(category: Optional[str] = None, db: AsyncSession = Depe
             "name": p.name,
             "description": p.description,
             "category": p.category,
+            "timeline_events": p.timeline_events or [],
             "is_active": p.is_active,
             "rules": [
                 {
@@ -104,6 +112,7 @@ async def create_protocol(payload: ProtocolCreate, db: AsyncSession = Depends(ge
         name=payload.name,
         description=payload.description,
         category=payload.category,
+        timeline_events=payload.timeline_events or [],
         is_active=True,
         created_by=creator_id,
     )
@@ -134,6 +143,7 @@ async def create_protocol(payload: ProtocolCreate, db: AsyncSession = Depends(ge
 async def preview_calendar(payload: CalendarPreviewRequest, db: AsyncSession = Depends(get_db)):
     """Dry-run calendar preview given protocol rules and sentinel dates."""
     rules_data = []
+    timeline_events = []
     if payload.protocol_template_id:
         proto_id = None
         try:
@@ -149,6 +159,9 @@ async def preview_calendar(payload: CalendarPreviewRequest, db: AsyncSession = D
                 proto_id = found_p.id
 
         if proto_id:
+            proto_template = await db.get(ProtocolTemplate, proto_id)
+            if proto_template:
+                timeline_events = proto_template.timeline_events or []
             result = await db.execute(
                 select(ProtocolDrugRule)
                 .where(ProtocolDrugRule.protocol_template_id == proto_id)
@@ -167,12 +180,14 @@ async def preview_calendar(payload: CalendarPreviewRequest, db: AsyncSession = D
                     "instructions": r.instructions,
                 })
     elif payload.custom_rules:
+        timeline_events = []
         rules_data = [r.dict() for r in payload.custom_rules]
 
     return generate_medication_calendar(
         rules=rules_data,
         sentinel_dates=payload.sentinel_dates or {},
         total_days=21,
+        timeline_events=timeline_events,
     )
 
 
@@ -182,6 +197,7 @@ class ProtocolUpdate(BaseModel):
     category: Optional[str] = None
     is_active: Optional[bool] = None
     rules: Optional[List[RuleCreate]] = None
+    timeline_events: Optional[List[dict]] = None
 
 
 @router.put("/{protocol_id}")
@@ -197,6 +213,8 @@ async def update_protocol(protocol_id: UUID, payload: ProtocolUpdate, db: AsyncS
         template.category = payload.category
     if payload.is_active is not None:
         template.is_active = payload.is_active
+    if payload.timeline_events is not None:
+        template.timeline_events = payload.timeline_events
 
     if payload.rules is not None:
         existing_rules = (await db.execute(
@@ -226,13 +244,37 @@ async def update_protocol(protocol_id: UUID, payload: ProtocolUpdate, db: AsyncS
 
 
 @router.delete("/{protocol_id}")
-async def delete_protocol(protocol_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_protocol(
+    protocol_id: UUID,
+    hard_delete: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
     template = await db.get(ProtocolTemplate, protocol_id)
     if not template:
         raise HTTPException(status_code=404, detail="Protocol not found")
-    template.is_active = False
+    if hard_delete:
+        rules_res = await db.execute(
+            select(ProtocolDrugRule).where(ProtocolDrugRule.protocol_template_id == protocol_id)
+        )
+        for r in rules_res.scalars().all():
+            await db.delete(r)
+        await db.delete(template)
+        await db.commit()
+        return {"status": "success", "message": "Protocol permanently deleted"}
+    else:
+        template.is_active = False
+        await db.commit()
+        return {"status": "success", "message": "Protocol deactivated"}
+
+
+@router.post("/{protocol_id}/reactivate")
+async def reactivate_protocol(protocol_id: UUID, db: AsyncSession = Depends(get_db)):
+    template = await db.get(ProtocolTemplate, protocol_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Protocol not found")
+    template.is_active = True
     await db.commit()
-    return {"status": "success", "message": "Protocol deleted successfully"}
+    return {"status": "success", "message": "Protocol reactivated successfully"}
 
 
 # Alias router for frontend /protocol-library/templates compatibility
@@ -243,5 +285,6 @@ templates_router.add_api_route("", create_protocol, methods=["POST"], status_cod
 templates_router.add_api_route("/", create_protocol, methods=["POST"], status_code=201)
 templates_router.add_api_route("/{protocol_id}", update_protocol, methods=["PUT"])
 templates_router.add_api_route("/{protocol_id}", delete_protocol, methods=["DELETE"])
+templates_router.add_api_route("/{protocol_id}/reactivate", reactivate_protocol, methods=["POST"])
 templates_router.add_api_route("/preview-calendar", preview_calendar, methods=["POST"])
 
