@@ -1480,7 +1480,9 @@ async def main_async():
             # 1 & 2. Core (Hospitals & Staff)
             hosp_file = resolve_template("01_hospitals_and_branches.csv")
             staff_file = TEMPLATES_DIR / "02_staff_users.csv"
-            if not staff_file.exists():
+            if args.domain not in ("all", "core", "staff") and not args.all:
+                staff_file = None
+            elif not staff_file.exists():
                 staff_file = None
 
             hospital, branch_map, _ = await run_domain_core(session, hosp_file, staff_file, args.dry_run, conflict_mode)
