@@ -102,6 +102,13 @@ async def run_init_schema(
                 "ALTER TABLE branches ADD COLUMN IF NOT EXISTS gstin VARCHAR(50);",
                 "ALTER TABLE branches ADD COLUMN IF NOT EXISTS receipt_header JSONB DEFAULT '{}'::jsonb;",
                 "ALTER TABLE branches ADD COLUMN IF NOT EXISTS ip_whitelist JSONB DEFAULT '[]'::jsonb;",
+                "ALTER TABLE protocol_templates ADD COLUMN IF NOT EXISTS timeline_events JSONB DEFAULT '[]'::jsonb;",
+                "ALTER TABLE treatment_cycles ADD COLUMN IF NOT EXISTS medication_calendar JSONB DEFAULT '[]'::jsonb;",
+                "ALTER TABLE treatment_cycles ADD COLUMN IF NOT EXISTS et_discharge_summary JSONB DEFAULT '{}'::jsonb;",
+                "ALTER TABLE patients ADD COLUMN IF NOT EXISTS marketing_person_name VARCHAR(255);",
+                "ALTER TABLE patients ADD COLUMN IF NOT EXISTS referring_doctor VARCHAR(255);",
+                "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);",
+                "ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);",
             ]
             for stmt in column_migrations:
                 try:

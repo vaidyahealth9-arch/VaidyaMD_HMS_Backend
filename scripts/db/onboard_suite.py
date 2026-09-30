@@ -708,6 +708,13 @@ async def run_domain_protocols(
 
         cat = s_get(r, "category", "antagonist")
         desc_val = s_get(r, "description")
+        timeline_raw = s_get(r, "timeline_events")
+        timeline_val = []
+        if timeline_raw:
+            try:
+                timeline_val = json.loads(timeline_raw)
+            except Exception:
+                timeline_val = []
 
         if existing_p:
             action = resolve_conflict(f"Protocol '{p_name}'", conflict_mode)
@@ -715,6 +722,8 @@ async def run_domain_protocols(
                 existing_p.category = cat
                 existing_p.description = desc_val
                 existing_p.branch_id = target_branch.id
+                existing_p.timeline_events = timeline_val
+                existing_p.is_active = True
                 protocol_map[p_name] = existing_p
                 stats["updated"] += 1
                 print(f"   🔄 Updated Protocol: {p_name}")
@@ -730,6 +739,7 @@ async def run_domain_protocols(
                 name=p_name,
                 category=cat,
                 description=desc_val,
+                timeline_events=timeline_val,
                 created_by=author_id,
                 is_active=True
             )
@@ -738,6 +748,20 @@ async def run_domain_protocols(
             protocol_map[p_name] = p_obj
             stats["created"] += 1
             print(f"   ✨ Created Protocol: {p_name} ({cat})")
+
+    # Excel-only rule: Deactivate any older protocols not present in the current template
+    if conflict_mode in ["overwrite", "force-upsert"]:
+        active_names = [s_get(r, "protocol_name") for r in prot_rows]
+        res_old = await session.execute(
+            select(ProtocolTemplate).where(
+                ProtocolTemplate.tenant_id == hospital.id,
+                ProtocolTemplate.name.notin_(active_names),
+                ProtocolTemplate.is_active == True
+            )
+        )
+        for old_p in res_old.scalars().all():
+            old_p.is_active = False
+            print(f"   🗑️  Deactivated non-Excel Protocol: {old_p.name}")
 
     # 2. Drug Rules
     rule_rows = [r for r in reader if s_get(r, "record_type").upper() == "DRUG_RULE"]
@@ -1456,7 +1480,9 @@ async def main_async():
             # 1 & 2. Core (Hospitals & Staff)
             hosp_file = resolve_template("01_hospitals_and_branches.csv")
             staff_file = TEMPLATES_DIR / "02_staff_users.csv"
-            if not staff_file.exists():
+            if args.domain not in ("all", "core", "staff") and not args.all:
+                staff_file = None
+            elif not staff_file.exists():
                 staff_file = None
 
             hospital, branch_map, _ = await run_domain_core(session, hosp_file, staff_file, args.dry_run, conflict_mode)

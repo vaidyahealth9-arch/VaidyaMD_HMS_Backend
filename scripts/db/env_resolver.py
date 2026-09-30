@@ -85,4 +85,7 @@ def resolve_database_url(env_name: str = "local", explicit_url: str | None = Non
 def create_env_engine(env_name: str = "local", explicit_url: str | None = None, auto_confirm: bool = False) -> AsyncEngine:
     """Creates a SQLAlchemy async engine targeting the selected environment."""
     url = resolve_database_url(env_name=env_name, explicit_url=explicit_url, auto_confirm=auto_confirm)
-    return create_async_engine(url, echo=False, pool_pre_ping=True)
+    connect_args = {}
+    if "127.0.0.1" in url or "localhost" in url:
+        connect_args["ssl"] = False
+    return create_async_engine(url, echo=False, pool_pre_ping=True, connect_args=connect_args)

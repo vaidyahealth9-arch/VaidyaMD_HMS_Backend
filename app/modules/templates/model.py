@@ -34,6 +34,7 @@ class ProtocolTemplate(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     category = Column(String(50), default="stimulation")
+    timeline_events = Column(JSONB, default=list)
     is_active = Column(Boolean, default=True)
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
