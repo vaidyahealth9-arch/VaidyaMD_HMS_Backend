@@ -49,6 +49,7 @@ async def init_db():
         try:
             await conn.execute(text("ALTER TABLE treatment_cycles ADD COLUMN IF NOT EXISTS medication_calendar JSONB DEFAULT '[]'::jsonb;"))
             await conn.execute(text("ALTER TABLE treatment_cycles ADD COLUMN IF NOT EXISTS et_discharge_summary JSONB DEFAULT '{}'::jsonb;"))
+            await conn.execute(text("ALTER TABLE protocol_templates ADD COLUMN IF NOT EXISTS timeline_events JSONB DEFAULT '[]'::jsonb;"))
             await conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS marketing_person_name VARCHAR(255);"))
             await conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS referring_doctor VARCHAR(255);"))
             await conn.execute(text("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);"))

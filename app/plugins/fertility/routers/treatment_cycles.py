@@ -23,11 +23,14 @@ router = APIRouter(prefix="/treatment-cycles", tags=["Fertility — Treatment Cy
 
 @router.get("/types", tags=["Fertility — Treatment Cycles"])
 async def list_cycle_types(
+    include_inactive: bool = False,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return all active treatment cycle types for dropdown population directly from database."""
-    query = select(TreatmentCycleType).where(TreatmentCycleType.is_active == True)
+    """Return all active (or all if include_inactive=True) treatment cycle types for dropdown population or master settings."""
+    query = select(TreatmentCycleType)
+    if not include_inactive:
+        query = query.where(TreatmentCycleType.is_active == True)
     if current_user and current_user.tenant_id:
         query = query.where(
             or_(
@@ -121,15 +124,35 @@ async def update_cycle_type(
 @router.delete("/types/{type_id}", tags=["Fertility — Treatment Cycles"])
 async def delete_cycle_type(
     type_id: UUID,
+    hard_delete: bool = False,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     cycle_type = await db.get(TreatmentCycleType, type_id)
     if not cycle_type or (cycle_type.tenant_id and cycle_type.tenant_id != current_user.tenant_id):
         raise HTTPException(status_code=404, detail="Cycle type not found")
-    cycle_type.is_active = False
+    if hard_delete:
+        await db.delete(cycle_type)
+        await db.commit()
+        return {"status": "success", "message": "Cycle type permanently deleted"}
+    else:
+        cycle_type.is_active = False
+        await db.commit()
+        return {"status": "success", "message": "Cycle type deactivated"}
+
+
+@router.post("/types/{type_id}/reactivate", tags=["Fertility — Treatment Cycles"])
+async def reactivate_cycle_type(
+    type_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cycle_type = await db.get(TreatmentCycleType, type_id)
+    if not cycle_type or (cycle_type.tenant_id and cycle_type.tenant_id != current_user.tenant_id):
+        raise HTTPException(status_code=404, detail="Cycle type not found")
+    cycle_type.is_active = True
     await db.commit()
-    return {"status": "success", "message": "Cycle type deleted successfully"}
+    return {"status": "success", "message": "Cycle type reactivated successfully"}
 
 
 
@@ -261,7 +284,11 @@ async def create_treatment_cycle(
 
     if not has_meds and (resolved_proto_id or payload.sentinel_dates):
         rules_data = []
+        timeline_events = []
         if resolved_proto_id:
+            proto_obj = await db.get(ProtocolTemplate, resolved_proto_id)
+            if proto_obj:
+                timeline_events = proto_obj.timeline_events or []
             r_res = await db.execute(
                 select(ProtocolDrugRule)
                 .where(ProtocolDrugRule.protocol_template_id == resolved_proto_id)
@@ -282,6 +309,8 @@ async def create_treatment_cycle(
             rules=rules_data,
             sentinel_dates=payload.sentinel_dates or {},
             total_days=21,
+            treatment_type=payload.treatment_type,
+            timeline_events=timeline_events,
         )
         if gen_cal and gen_cal.get("days"):
             med_calendar = gen_cal["days"]
@@ -669,7 +698,11 @@ async def get_cycle_medication_calendar(cycle_id: UUID, db: AsyncSession = Depen
             }
 
     rules_data = []
+    timeline_events = []
     if cycle.protocol_template_id:
+        proto_obj = await db.get(ProtocolTemplate, cycle.protocol_template_id)
+        if proto_obj:
+            timeline_events = proto_obj.timeline_events or []
         result = await db.execute(
             select(ProtocolDrugRule)
             .where(ProtocolDrugRule.protocol_template_id == cycle.protocol_template_id)
@@ -693,6 +726,7 @@ async def get_cycle_medication_calendar(cycle_id: UUID, db: AsyncSession = Depen
         sentinel_dates=cycle.sentinel_dates or {},
         total_days=21,
         treatment_type=cycle.treatment_type,
+        timeline_events=timeline_events,
     )
     calendar["cycle_id"] = cycle.cycle_id
     calendar["treatment_type"] = cycle.treatment_type

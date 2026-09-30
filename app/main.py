@@ -66,9 +66,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan — runs on startup and shutdown."""
     print("🚀 VaidyaMD HMS starting up...")
     try:
-        async with AsyncSessionLocal() as session:
-            await session.execute(text("SELECT 1"))
-        print("✅ Database connection verified (schema managed independently)")
+        from app.core.database import init_db
+        await init_db()
+        print("✅ Database connection verified and additive migrations applied")
     except Exception as e:
         print(f"⚠️ Database connection verification notice: {e}")
 
