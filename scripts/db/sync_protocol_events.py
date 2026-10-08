@@ -1,21 +1,24 @@
 """
 Sync Clinical Protocol Timeline Events from 07_clinical_protocols.csv to Database.
+Supports --env local | dev | prod.
 """
 import asyncio
 import csv
 import json
 import sys
+import argparse
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
 from sqlalchemy import text
-from app.core.database import AsyncSessionLocal
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from scripts.db.env_resolver import create_env_engine
 
 CSV_PATH = Path(__file__).resolve().parent / "templates" / "07_clinical_protocols.csv"
 
-async def sync_events():
+async def sync_events(env_name: str = "local"):
     if not CSV_PATH.exists():
         print(f"Error: CSV file not found at {CSV_PATH}")
         return
@@ -37,7 +40,10 @@ async def sync_events():
 
     print(f"Parsed {len(prot_events)} protocols with timeline events from CSV.")
 
-    async with AsyncSessionLocal() as session:
+    engine = create_env_engine(env_name=env_name, auto_confirm=True)
+    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+    async with async_session() as session:
         for p_name, events in prot_events.items():
             ev_json = json.dumps(events)
             query = text("""
@@ -53,9 +59,14 @@ async def sync_events():
         # Verify
         check_q = text("SELECT name, jsonb_array_length(timeline_events) FROM protocol_templates WHERE timeline_events IS NOT NULL;")
         res = await session.execute(check_q)
-        print("\n--- Current Protocol Event Counts in Database ---")
+        print(f"\n--- Current Protocol Event Counts in {env_name.upper()} Database ---")
         for row in res.fetchall():
             print(f"  * {row[0]}: {row[1]} events")
 
+    await engine.dispose()
+
 if __name__ == "__main__":
-    asyncio.run(sync_events())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env", default="local", choices=["local", "dev", "prod"])
+    args = parser.parse_args()
+    asyncio.run(sync_events(args.env))
