@@ -728,6 +728,8 @@ async def run_domain_protocols(
                 stats["updated"] += 1
                 print(f"   🔄 Updated Protocol: {p_name}")
             else:
+                if (not existing_p.timeline_events or existing_p.timeline_events == []) and timeline_val:
+                    existing_p.timeline_events = timeline_val
                 protocol_map[p_name] = existing_p
                 stats["skipped"] += 1
                 print(f"   ⏭️  Skipped Protocol: {p_name}")

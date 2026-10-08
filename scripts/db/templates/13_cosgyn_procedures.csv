@@ -5,3 +5,6 @@ name,package_combo,jet_plasma_sessions,jet_plasma_duration_mins,tesla_chair_sess
 "Comprehensive Dual Pelvic & Mucosal Regeneration",Combo Deluxe,3,25,6,30,2,65000.00,MAIN
 "Labiaplasty Aesthetic Contouring",Surgical In-Office Daycare,0,0,0,0,0,45000.00,MAIN
 "Intimate Area Pigmentation Lightening (Laser)",Laser Peeling,4,20,0,0,0,18000.00,MAIN
+"Single Session: Jet Plasma",Single Standalone Session,1,30,0,0,0,10000.00,MAIN
+"Single Session: Tesla Chair",Single Standalone Session,0,0,1,30,0,4000.00,MAIN
+"Single Session: Jet Plasma & Tesla Chair",Single Standalone Session,1,30,1,30,0,13500.00,MAIN

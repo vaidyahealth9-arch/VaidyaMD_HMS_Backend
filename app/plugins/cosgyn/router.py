@@ -71,6 +71,7 @@ class CustomSessionItem(BaseModel):
 class CreatePlanRequest(BaseModel):
     patient_id: str
     treatment_id: Optional[str] = None
+    treatment_name: Optional[str] = None
     equipment: Optional[str] = None
     start_date: Optional[datetime.date] = None
     frequency: Optional[FrequencyType] = FrequencyType.WEEKLY
@@ -229,16 +230,50 @@ async def create_plan(
         except Exception:
             pass
 
-    # Fallback if manual equipment was selected or treatment ID not matched
+    # Resolve or create clean treatment record for single/custom sessions
     if not treatment:
-        if req.equipment:
+        desired_name = req.treatment_name or (
+            f"Single Session: {req.equipment}" if req.equipment else "CosGyn Custom Protocol"
+        )
+        # 1. Exact match by name
+        treatment_result = await db.execute(
+            select(CosgynTreatment).filter(CosgynTreatment.name == desired_name)
+        )
+        treatment = treatment_result.scalars().first()
+
+        # 2. Check if single session treatment exists for this equipment
+        if not treatment and req.equipment:
             treatment_result = await db.execute(
-                select(CosgynTreatment).filter(CosgynTreatment.name.ilike(f"%{req.equipment}%"))
+                select(CosgynTreatment).filter(
+                    CosgynTreatment.package_combo.ilike("%single%"),
+                    CosgynTreatment.name.ilike(f"%{req.equipment}%")
+                )
             )
             treatment = treatment_result.scalars().first()
+
+        # 3. If still not found, create a dedicated clean treatment record
         if not treatment:
-            res = await db.execute(select(CosgynTreatment).order_by(CosgynTreatment.name.asc()))
-            treatment = res.scalars().first()
+            num_jp = sum(1 for s in (req.custom_sessions or []) if "jet" in (s.equipment or "").lower())
+            num_tc = sum(1 for s in (req.custom_sessions or []) if "tesla" in (s.equipment or "").lower())
+            if not num_jp and not num_tc and req.equipment:
+                if "jet" in req.equipment.lower():
+                    num_jp = 1
+                if "tesla" in req.equipment.lower():
+                    num_tc = 1
+
+            treatment = CosgynTreatment(
+                tenant_id=current_user.tenant_id,
+                branch_id=current_user.branch_id,
+                name=desired_name,
+                package_combo="Single Standalone Session",
+                jet_plasma_sessions=num_jp,
+                jet_plasma_duration_mins=30 if num_jp else 0,
+                tesla_chair_sessions=num_tc,
+                tesla_chair_duration_mins=30 if num_tc else 0,
+                price=float(req.total_amount or 0.0)
+            )
+            db.add(treatment)
+            await db.flush()
 
     if not treatment:
         raise HTTPException(status_code=404, detail="CosGyn treatment protocol not found")

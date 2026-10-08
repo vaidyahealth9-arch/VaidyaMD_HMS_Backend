@@ -56,6 +56,7 @@ class NursingTaskCreate(BaseModel):
     scheduled_time: Optional[datetime] = None
 
 class NursingTaskComplete(BaseModel):
-    completed_by_id: UUID
+    completed_by_id: Optional[UUID] = None
     vitals_payload: Optional[dict[str, Any]] = None
     notes: Optional[str] = None
+

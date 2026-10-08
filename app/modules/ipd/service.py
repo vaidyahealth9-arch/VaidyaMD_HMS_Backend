@@ -105,7 +105,7 @@ class IPDService:
                         "admission_number": adm.admission_number,
                         "patient_id": str(adm.patient_id),
                         "patient_name": pat.name if pat else "Unknown",
-                        "patient_mrn": pat.mrn if pat else "—",
+                        "patient_mrn": getattr(pat, "mrn", getattr(pat, "vid", "—")),
                         "admitting_doctor": doc.name if doc else "Attending Physician",
                         "diagnosis": adm.diagnosis,
                         "admission_date": adm.admission_date.isoformat(),
@@ -280,3 +280,175 @@ class IPDService:
 
         await self.db.flush()
         return {"message": "Patient discharged successfully. Bed set to Cleaning mode."}
+
+    async def list_admissions(self, status: Optional[str] = None, tenant_id: Optional[UUID] = None):
+        query = select(IPDAdmission).order_by(IPDAdmission.admission_date.desc())
+        if tenant_id:
+            query = query.where(IPDAdmission.tenant_id == tenant_id)
+        if status:
+            if status.lower() in ["active", "admitted"]:
+                query = query.where(IPDAdmission.status.in_(["Active", "Admitted"]))
+            else:
+                query = query.where(IPDAdmission.status.ilike(f"%{status}%"))
+
+        result = await self.db.execute(query)
+        admissions = result.scalars().all()
+
+        enriched = []
+        for adm in admissions:
+            pat = await self.db.get(Patient, adm.patient_id)
+            doc = await self.db.get(User, adm.admitting_doctor_id) if adm.admitting_doctor_id else None
+            bed = await self.db.get(Bed, adm.bed_id) if adm.bed_id else None
+            enriched.append({
+                "id": str(adm.id),
+                "admission_number": adm.admission_number,
+                "patient_id": str(adm.patient_id),
+                "patient_name": pat.name if pat else "Unknown",
+                "patient_mrn": getattr(pat, "mrn", getattr(pat, "vid", "—")),
+                "bed_id": str(adm.bed_id),
+                "bed_number": bed.bed_number if bed else "—",
+                "admitting_doctor_id": str(adm.admitting_doctor_id) if adm.admitting_doctor_id else None,
+                "admitting_doctor": doc.name if doc else "Attending Physician",
+                "diagnosis": adm.diagnosis,
+                "package_name": adm.package_name,
+                "admission_date": adm.admission_date.isoformat() if adm.admission_date else "",
+                "discharge_date": adm.discharge_date.isoformat() if adm.discharge_date else None,
+                "status": adm.status,
+                "total_accrued_amount": adm.total_accrued_amount or 0.0,
+                "notes": adm.notes,
+            })
+        return enriched
+
+    async def transfer_bed(self, admission_id: UUID, payload: TransferBedRequest):
+        admission = await self.db.get(IPDAdmission, admission_id)
+        if not admission:
+            raise ValueError("Admission not found")
+        old_bed = await self.db.get(Bed, admission.bed_id)
+        new_bed = await self.db.get(Bed, payload.target_bed_id)
+        if not new_bed:
+            raise ValueError("Target bed not found")
+        if new_bed.status == "Occupied":
+            raise ValueError("Target bed is already occupied")
+
+        if old_bed:
+            old_bed.status = "Cleaning"
+            old_bed.current_admission_id = None
+
+        new_bed.status = "Occupied"
+        new_bed.current_admission_id = admission.id
+        admission.bed_id = new_bed.id
+        await self.db.flush()
+        return {"message": f"Patient transferred to bed {new_bed.bed_number}", "bed_id": str(new_bed.id)}
+
+    async def list_nursing_tasks(
+        self,
+        admission_id: Optional[UUID] = None,
+        bed_id: Optional[UUID] = None,
+        status: Optional[str] = None,
+        tenant_id: Optional[UUID] = None,
+    ):
+        query = select(NursingTask).order_by(NursingTask.scheduled_time.asc())
+        if tenant_id:
+            query = query.where(NursingTask.tenant_id == tenant_id)
+        if admission_id:
+            query = query.where(NursingTask.admission_id == admission_id)
+        if bed_id:
+            query = query.where(NursingTask.bed_id == bed_id)
+        if status:
+            query = query.where(NursingTask.status.ilike(f"%{status}%"))
+
+        result = await self.db.execute(query)
+        tasks = result.scalars().all()
+
+        enriched = []
+        for t in tasks:
+            bed = await self.db.get(Bed, t.bed_id) if t.bed_id else None
+            adm = await self.db.get(IPDAdmission, t.admission_id) if t.admission_id else None
+            pat = await self.db.get(Patient, adm.patient_id) if adm and adm.patient_id else None
+            user = await self.db.get(User, t.completed_by_id) if t.completed_by_id else None
+
+            enriched.append({
+                "id": str(t.id),
+                "admission_id": str(t.admission_id),
+                "bed_id": str(t.bed_id),
+                "bed_number": bed.bed_number if bed else "—",
+                "patient_name": pat.name if pat else "Inpatient",
+                "task_type": t.task_type,
+                "description": t.description,
+                "frequency": t.frequency,
+                "scheduled_time": t.scheduled_time.isoformat() if t.scheduled_time else "",
+                "status": t.status,
+                "completed_by_id": str(t.completed_by_id) if t.completed_by_id else None,
+                "completed_by_name": user.name if user else None,
+                "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                "vitals_payload": t.vitals_payload or {},
+                "notes": t.notes,
+            })
+        return enriched
+
+    async def create_nursing_task(
+        self,
+        payload: NursingTaskCreate,
+        tenant_id: Optional[UUID] = None,
+        branch_id: Optional[UUID] = None,
+    ):
+        task = NursingTask(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            admission_id=payload.admission_id,
+            bed_id=payload.bed_id,
+            task_type=payload.task_type,
+            description=payload.description,
+            frequency=payload.frequency,
+            scheduled_time=payload.scheduled_time or datetime.utcnow(),
+            status="Pending",
+        )
+        self.db.add(task)
+        await self.db.flush()
+        await self.db.refresh(task)
+        return {
+            "id": str(task.id),
+            "message": "Nursing task created successfully",
+            "task_type": task.task_type,
+            "description": task.description,
+        }
+
+    async def complete_nursing_task(
+        self,
+        task_id: UUID,
+        payload: NursingTaskComplete,
+        user_id: Optional[UUID] = None,
+    ):
+        task = await self.db.get(NursingTask, task_id)
+        if not task:
+            raise ValueError("Nursing task not found")
+        task.status = "Completed"
+        task.completed_at = datetime.utcnow()
+        task.completed_by_id = payload.completed_by_id or user_id
+        if payload.vitals_payload:
+            task.vitals_payload = payload.vitals_payload
+        if payload.notes:
+            task.notes = f"{task.notes or ''}\n{payload.notes}".strip()
+        await self.db.flush()
+        return {
+            "message": "Nursing task marked as completed",
+            "task_id": str(task.id),
+            "status": "Completed",
+        }
+
+    async def accrue_daily_charges(self, tenant_id: Optional[UUID] = None):
+        query = select(IPDAdmission).where(IPDAdmission.status.in_(["Active", "Admitted"]))
+        if tenant_id:
+            query = query.where(IPDAdmission.tenant_id == tenant_id)
+        result = await self.db.execute(query)
+        admissions = result.scalars().all()
+        count = 0
+        for adm in admissions:
+            bed = await self.db.get(Bed, adm.bed_id)
+            if bed and bed.daily_rate:
+                adm.total_accrued_amount = (adm.total_accrued_amount or 0.0) + bed.daily_rate
+                adm.last_accrual_date = datetime.utcnow()
+                count += 1
+        await self.db.flush()
+        return {"success": True, "message": f"Daily charges accrued for {count} active inpatient admissions"}
+
