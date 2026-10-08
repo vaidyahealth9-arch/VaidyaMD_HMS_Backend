@@ -107,6 +107,7 @@ class TreatmentCycle(Base):
     partner = relationship("Patient", foreign_keys=[partner_id])
     doctor = relationship("User", foreign_keys=[treating_doctor_id])
     canceller = relationship("User", foreign_keys=[cancelled_by])
+    creator = relationship("User", foreign_keys=[created_by])
     protocol_template = relationship("ProtocolTemplate", back_populates="treatment_cycles")
     oocytes = relationship("OocyteRecord", back_populates="treatment_cycle", cascade="all, delete-orphan")
     witnesses = relationship("EmbryologyWitness", back_populates="treatment_cycle", cascade="all, delete-orphan")

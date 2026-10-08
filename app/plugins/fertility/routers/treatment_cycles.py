@@ -196,13 +196,33 @@ async def generate_cycle_id(db: AsyncSession) -> str:
     return f"TC-{year}-{count:04d}"
 
 
-def serialize_treatment_cycle(cycle: TreatmentCycle, patient: Optional[Patient] = None, partner: Optional[Patient] = None) -> dict:
+def serialize_treatment_cycle(
+    cycle: TreatmentCycle,
+    patient: Optional[Patient] = None,
+    partner: Optional[Patient] = None,
+    creator: Optional[User] = None,
+    doctor: Optional[User] = None,
+) -> dict:
+    creator_name = None
+    if creator:
+        creator_name = creator.name
+    elif getattr(cycle, "creator", None):
+        creator_name = cycle.creator.name
+
+    doc_name = None
+    if doctor:
+        doc_name = doctor.name
+    elif getattr(cycle, "doctor", None):
+        doc_name = cycle.doctor.name
+
     return {
         "id": str(cycle.id),
         "cycle_id": cycle.cycle_id,
         "patient_id": str(cycle.patient_id),
         "partner_id": str(cycle.partner_id) if cycle.partner_id else None,
         "treating_doctor_id": str(cycle.treating_doctor_id),
+        "treating_doctor_name": doc_name,
+        "doctor_name": doc_name,
         "treatment_type": cycle.treatment_type,
         "status": cycle.status.value if hasattr(cycle.status, "value") else str(cycle.status),
         "attempt_number": cycle.attempt_number,
@@ -223,6 +243,7 @@ def serialize_treatment_cycle(cycle: TreatmentCycle, patient: Optional[Patient] 
         "remarks": cycle.remarks,
         "tenant_id": str(cycle.tenant_id),
         "created_by": str(cycle.created_by),
+        "created_by_name": creator_name,
         "created_at": cycle.created_at.isoformat() if cycle.created_at else None,
         "updated_at": cycle.updated_at.isoformat() if cycle.updated_at else None,
         # Enriched Patient & Partner fields for unified Couple EMR
@@ -341,7 +362,9 @@ async def create_treatment_cycle(
     await db.flush()
     await db.refresh(cycle)
     partner = await db.get(Patient, cycle.partner_id) if cycle.partner_id else None
-    return serialize_treatment_cycle(cycle, patient, partner)
+    creator = await db.get(User, cycle.created_by) if cycle.created_by else None
+    doctor = await db.get(User, cycle.treating_doctor_id) if cycle.treating_doctor_id else None
+    return serialize_treatment_cycle(cycle, patient, partner, creator, doctor)
 
 
 @router.get("")
@@ -369,13 +392,18 @@ async def list_treatment_cycles(
     result = await db.execute(query)
     cycles = result.scalars().all()
 
-    # Batch load all related patients & partners in 1 query
+    # Batch load all related patients, partners, creators, & doctors in 1 query
     pat_ids = set()
+    user_ids = set()
     for c in cycles:
         if c.patient_id:
             pat_ids.add(c.patient_id)
         if c.partner_id:
             pat_ids.add(c.partner_id)
+        if c.created_by:
+            user_ids.add(c.created_by)
+        if c.treating_doctor_id:
+            user_ids.add(c.treating_doctor_id)
 
     patient_map = {}
     if pat_ids:
@@ -383,8 +411,20 @@ async def list_treatment_cycles(
         for p in p_res.scalars().all():
             patient_map[p.id] = p
 
+    user_map = {}
+    if user_ids:
+        u_res = await db.execute(select(User).where(User.id.in_(list(user_ids))))
+        for u in u_res.scalars().all():
+            user_map[u.id] = u
+
     return [
-        serialize_treatment_cycle(c, patient_map.get(c.patient_id), patient_map.get(c.partner_id))
+        serialize_treatment_cycle(
+            c,
+            patient_map.get(c.patient_id),
+            patient_map.get(c.partner_id),
+            user_map.get(c.created_by),
+            user_map.get(c.treating_doctor_id),
+        )
         for c in cycles
     ]
 
@@ -506,7 +546,9 @@ async def get_treatment_cycle(cycle_id: UUID, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=404, detail="Treatment cycle not found")
     patient = await db.get(Patient, cycle.patient_id) if cycle.patient_id else None
     partner = await db.get(Patient, cycle.partner_id) if cycle.partner_id else None
-    return serialize_treatment_cycle(cycle, patient, partner)
+    creator = await db.get(User, cycle.created_by) if cycle.created_by else None
+    doctor = await db.get(User, cycle.treating_doctor_id) if cycle.treating_doctor_id else None
+    return serialize_treatment_cycle(cycle, patient, partner, creator, doctor)
 
 
 @router.patch("/{cycle_id}/status")
@@ -560,12 +602,24 @@ async def update_sentinel_dates(
     await db.refresh(cycle)
     patient = await db.get(Patient, cycle.patient_id) if cycle.patient_id else None
     partner = await db.get(Patient, cycle.partner_id) if cycle.partner_id else None
-    return serialize_treatment_cycle(cycle, patient, partner)
+    creator = await db.get(User, cycle.created_by) if cycle.created_by else None
+    doctor = await db.get(User, cycle.treating_doctor_id) if cycle.treating_doctor_id else None
+    return serialize_treatment_cycle(cycle, patient, partner, creator, doctor)
 
 
 class CycleUpdate(BaseModel):
     status: Optional[TreatmentCycleStatus] = None
+    treatment_type: Optional[str] = None
+    attempt_number: Optional[int] = None
+    start_date: Optional[date] = None
+    treating_doctor_id: Optional[UUID] = None
+    female_factors: Optional[list[str]] = None
+    male_factors: Optional[list[str]] = None
+    treatment_at_other_centre: Optional[bool] = None
+    protocol_template_id: Optional[Union[UUID, str]] = None
     sentinel_dates: Optional[dict[str, Any]] = None
+    gametes_source: Optional[dict[str, Any]] = None
+    pgs_pgd_data: Optional[dict[str, Any]] = None
     endometrial_monitoring: Optional[list[dict[str, Any]]] = None
     medication_calendar: Optional[list[dict[str, Any]]] = None
     et_discharge_summary: Optional[dict[str, Any]] = None
@@ -605,16 +659,50 @@ async def update_treatment_cycle(
     payload: CycleUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Update treatment cycle fields (sentinel dates, medication calendar, status, remarks)."""
+    """Update treatment cycle fields (sentinel dates, medication calendar, status, factors, remarks, doctor, protocol)."""
     cycle = await db.get(TreatmentCycle, cycle_id)
     if not cycle:
         raise HTTPException(status_code=404, detail="Treatment cycle not found")
 
     if payload.status:
         cycle.status = payload.status
+    if payload.treatment_type is not None:
+        cycle.treatment_type = payload.treatment_type
+    if payload.attempt_number is not None:
+        cycle.attempt_number = payload.attempt_number
+    if payload.start_date is not None:
+        cycle.start_date = payload.start_date
+    if payload.treating_doctor_id is not None:
+        cycle.treating_doctor_id = payload.treating_doctor_id
+    if payload.protocol_template_id is not None:
+        try:
+            cycle.protocol_template_id = UUID(str(payload.protocol_template_id))
+        except (ValueError, TypeError):
+            proto_q = await db.execute(
+                select(ProtocolTemplate)
+                .where(ProtocolTemplate.name.ilike(f"%{payload.protocol_template_id}%"))
+                .limit(1)
+            )
+            found_p = proto_q.scalar_one_or_none()
+            if found_p:
+                cycle.protocol_template_id = found_p.id
+    if payload.female_factors is not None:
+        cycle.female_factors = payload.female_factors
+        flag_modified(cycle, "female_factors")
+    if payload.male_factors is not None:
+        cycle.male_factors = payload.male_factors
+        flag_modified(cycle, "male_factors")
+    if payload.treatment_at_other_centre is not None:
+        cycle.treatment_at_other_centre = payload.treatment_at_other_centre
     if payload.sentinel_dates is not None:
         cycle.sentinel_dates = {**dict(cycle.sentinel_dates or {}), **payload.sentinel_dates}
         flag_modified(cycle, "sentinel_dates")
+    if payload.gametes_source is not None:
+        cycle.gametes_source = {**dict(cycle.gametes_source or {}), **payload.gametes_source}
+        flag_modified(cycle, "gametes_source")
+    if payload.pgs_pgd_data is not None:
+        cycle.pgs_pgd_data = {**dict(cycle.pgs_pgd_data or {}), **payload.pgs_pgd_data}
+        flag_modified(cycle, "pgs_pgd_data")
     if payload.endometrial_monitoring is not None:
         cycle.endometrial_monitoring = payload.endometrial_monitoring
         flag_modified(cycle, "endometrial_monitoring")
@@ -633,7 +721,9 @@ async def update_treatment_cycle(
     await db.refresh(cycle)
     patient = await db.get(Patient, cycle.patient_id) if cycle.patient_id else None
     partner = await db.get(Patient, cycle.partner_id) if cycle.partner_id else None
-    return serialize_treatment_cycle(cycle, patient, partner)
+    creator = await db.get(User, cycle.created_by) if cycle.created_by else None
+    doctor = await db.get(User, cycle.treating_doctor_id) if cycle.treating_doctor_id else None
+    return serialize_treatment_cycle(cycle, patient, partner, creator, doctor)
 
 
 @router.patch("/{cycle_id}/et-discharge")
@@ -663,9 +753,11 @@ async def update_et_discharge(
     await db.refresh(cycle)
     patient = await db.get(Patient, cycle.patient_id) if cycle.patient_id else None
     partner = await db.get(Patient, cycle.partner_id) if cycle.partner_id else None
+    creator = await db.get(User, cycle.created_by) if cycle.created_by else None
+    doctor = await db.get(User, cycle.treating_doctor_id) if cycle.treating_doctor_id else None
     return {
         "message": "Embryo Transfer discharge summary saved successfully",
-        "cycle": serialize_treatment_cycle(cycle, patient, partner)
+        "cycle": serialize_treatment_cycle(cycle, patient, partner, creator, doctor)
     }
 
 

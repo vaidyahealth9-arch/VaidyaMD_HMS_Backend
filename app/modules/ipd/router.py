@@ -123,6 +123,15 @@ async def update_bed_status(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+@router.get("/admissions")
+@router.get("/admissions/")
+async def list_admissions(
+    status: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    return await service.list_admissions(status=status, tenant_id=current_user.tenant_id)
+
 @router.post("/admissions", status_code=status.HTTP_201_CREATED)
 @router.post("/admissions/", status_code=status.HTTP_201_CREATED)
 async def admit_patient(
@@ -151,3 +160,74 @@ async def discharge_patient(
         return await service.discharge_patient(admission_id, payload)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+@router.post("/admissions/{admission_id}/transfer-bed")
+@router.post("/admissions/{admission_id}/transfer-bed/")
+async def transfer_bed(
+    admission_id: UUID,
+    payload: TransferBedRequest,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.transfer_bed(admission_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/nursing-tasks")
+@router.get("/nursing-tasks/")
+async def list_nursing_tasks(
+    admission_id: Optional[UUID] = None,
+    bed_id: Optional[UUID] = None,
+    status: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    return await service.list_nursing_tasks(
+        admission_id=admission_id,
+        bed_id=bed_id,
+        status=status,
+        tenant_id=current_user.tenant_id,
+    )
+
+@router.post("/nursing-tasks", status_code=status.HTTP_201_CREATED)
+@router.post("/nursing-tasks/", status_code=status.HTTP_201_CREATED)
+async def create_nursing_task(
+    payload: NursingTaskCreate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.create_nursing_task(
+            payload,
+            tenant_id=current_user.tenant_id,
+            branch_id=current_user.branch_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/nursing-tasks/{task_id}/complete")
+@router.post("/nursing-tasks/{task_id}/complete/")
+async def complete_nursing_task(
+    task_id: UUID,
+    payload: NursingTaskComplete,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.complete_nursing_task(
+            task_id,
+            payload,
+            user_id=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.post("/accrue-daily-charges")
+@router.post("/accrue-daily-charges/")
+async def accrue_daily_charges(
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    return await service.accrue_daily_charges(tenant_id=current_user.tenant_id)
+
