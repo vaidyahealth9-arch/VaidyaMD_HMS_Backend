@@ -17,10 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from pydantic import BaseModel
 
+import logging
 from app.config import settings
 from app.core.database import get_db
 from app.core.models import Document, Patient, User
 from app.core.dependencies import get_current_user
+
+logger = logging.getLogger("vaidyamd.documents")
 
 router = APIRouter(prefix="/documents", tags=["Documents & Reports"])
 
@@ -134,7 +137,19 @@ async def upload_document_file(
     file_uuid = uuid.uuid4()
     stored_filename = f"{file_uuid}{ext}"
 
-    # Check GCS Storage if configured
+    content = await file.read()
+    mime_type = file.content_type or "application/octet-stream"
+
+    # 1. Always save to local disk cache
+    base_upload_dir = Path(settings.UPLOAD_DIR).resolve()
+    target_dir = base_upload_dir / subpath
+    target_dir.mkdir(parents=True, exist_ok=True)
+    destination = target_dir / stored_filename
+
+    with open(destination, "wb") as f:
+        f.write(content)
+
+    # 2. Persist to Google Cloud Storage if configured (background cloud sync)
     if settings.GCS_BUCKET_NAME:
         try:
             from google.cloud import storage
@@ -142,37 +157,18 @@ async def upload_document_file(
             bucket = client.bucket(settings.GCS_BUCKET_NAME)
             blob_path = f"{subpath}/{stored_filename}"
             blob = bucket.blob(blob_path)
-            content = await file.read()
-            blob.upload_from_string(content, content_type=file.content_type)
-            gcs_url = f"https://storage.googleapis.com/{settings.GCS_BUCKET_NAME}/{blob_path}"
-            return {
-                "url": gcs_url,
-                "folder": subpath,
-                "file_name": file.filename,
-                "file_size": len(content),
-                "mime_type": file.content_type or "application/octet-stream",
-            }
+            blob.upload_from_string(content, content_type=mime_type)
+            logger.info(f"✅ Synced uploaded file to GCS: gs://{settings.GCS_BUCKET_NAME}/{blob_path}")
         except Exception as e:
-            # Fall back to local disk storage
-            print(f"⚠️ GCS upload notice ({e}), storing to local disk...")
-            await file.seek(0)
+            logger.error(f"⚠️ GCS sync failed for bucket '{settings.GCS_BUCKET_NAME}': {e}", exc_info=True)
 
-    # Local Disk Fallback
-    base_upload_dir = Path(settings.UPLOAD_DIR).resolve()
-    target_dir = base_upload_dir / subpath
-    target_dir.mkdir(parents=True, exist_ok=True)
-    destination = target_dir / stored_filename
-
-    content = await file.read()
-    with open(destination, "wb") as f:
-        f.write(content)
-
+    # 3. Always return clean relative URL (no public cloud bucket URL leaked)
     return {
         "url": f"/uploads/{subpath}/{stored_filename}",
         "folder": subpath,
         "file_name": file.filename,
         "file_size": len(content),
-        "mime_type": file.content_type or "application/octet-stream",
+        "mime_type": mime_type,
     }
 
 

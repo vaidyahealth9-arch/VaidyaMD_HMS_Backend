@@ -9,9 +9,10 @@ import asyncio
 import logging
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from app.config import settings
@@ -205,10 +206,47 @@ for prefix in ["/api/plugins", "/plugins"]:
     app.include_router(opd_router, prefix=prefix)
     app.include_router(cosgyn_router, prefix=prefix)
 
-# --- Static Files (uploads) ---
+# --- Uploads Serving (Local Disk Cache + GCS Cloud Fallback) ---
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
-app.mount("/api/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="api_uploads")
+
+@app.get("/uploads/{file_path:path}")
+@app.get("/api/uploads/{file_path:path}")
+async def serve_uploaded_file(file_path: str):
+    """
+    Serves uploaded files with local disk caching and GCS cloud persistence fallback.
+    1. Checks local container disk cache.
+    2. If missing on local disk (e.g. after container restart / recycling), fetches
+       from Google Cloud Storage, writes to disk cache, and returns FileResponse.
+    Ensures URLs remain clean (/uploads/...) without leaking public cloud bucket URLs.
+    """
+    base_dir = Path(settings.UPLOAD_DIR).resolve()
+    clean_relative = file_path.lstrip("/\\")
+    local_file = (base_dir / clean_relative).resolve()
+
+    # Guard against directory traversal attacks
+    if not str(local_file).startswith(str(base_dir)):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    # 1. Serve immediately if found on local disk
+    if local_file.is_file():
+        return FileResponse(local_file)
+
+    # 2. Check GCS if configured
+    if settings.GCS_BUCKET_NAME:
+        try:
+            from google.cloud import storage
+            client = storage.Client()
+            bucket = client.bucket(settings.GCS_BUCKET_NAME)
+            blob = bucket.blob(clean_relative)
+            if blob.exists():
+                local_file.parent.mkdir(parents=True, exist_ok=True)
+                blob.download_to_filename(str(local_file))
+                logger.info(f"📥 Restored '{clean_relative}' from GCS to local container cache")
+                return FileResponse(local_file)
+        except Exception as e:
+            logger.error(f"Error fetching '{clean_relative}' from GCS: {e}")
+
+    raise HTTPException(status_code=404, detail="File not found")
 
 
 # --- WebSocket Endpoint ---
