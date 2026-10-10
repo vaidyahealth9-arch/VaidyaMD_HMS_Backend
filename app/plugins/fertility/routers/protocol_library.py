@@ -41,6 +41,7 @@ class CalendarPreviewRequest(BaseModel):
     protocol_template_id: Optional[Union[UUID, str]] = None
     custom_rules: Optional[List[RuleCreate]] = None
     sentinel_dates: dict[str, Any]
+    total_days: Optional[int] = None
 
 
 @router.get("/")
@@ -186,7 +187,7 @@ async def preview_calendar(payload: CalendarPreviewRequest, db: AsyncSession = D
     return generate_medication_calendar(
         rules=rules_data,
         sentinel_dates=payload.sentinel_dates or {},
-        total_days=21,
+        total_days=payload.total_days,
         timeline_events=timeline_events,
     )
 

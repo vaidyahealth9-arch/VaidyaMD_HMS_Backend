@@ -25,6 +25,27 @@ class AppointmentService:
         if sched_val and not sched_val.tzinfo:
             sched_val = sched_val.replace(tzinfo=timezone.utc)
 
+        inv_id = str(apt.invoice_id) if apt.invoice_id else None
+        inv_num = None
+        inv_status = None
+        inv_total = None
+        inv_paid = None
+        inv_due = None
+
+        if getattr(apt, "invoice", None):
+            inv = apt.invoice
+            inv_id = str(inv.id)
+            inv_num = inv.invoice_number
+            inv_status = inv.status.value if hasattr(inv.status, "value") else str(inv.status)
+            inv_total = float(inv.total_amount)
+            inv_paid = float(inv.paid_amount)
+            inv_due = max(0.0, float(inv.total_amount - inv.paid_amount))
+        elif apt.metadata_ and apt.metadata_.get("invoice_id"):
+            inv_id = str(apt.metadata_.get("invoice_id"))
+            inv_num = apt.metadata_.get("invoice_number")
+            if apt.metadata_.get("invoice_status"):
+                inv_status = str(apt.metadata_.get("invoice_status"))
+
         return AppointmentResponse(
             id=apt.id,
             patient_id=apt.patient_id,
@@ -39,6 +60,12 @@ class AppointmentService:
             status=apt.status.value if hasattr(apt.status, "value") else str(apt.status),
             visit_type=apt.visit_type,
             notes=apt.notes,
+            invoice_id=inv_id,
+            invoice_number=inv_num,
+            invoice_status=inv_status,
+            invoice_total=inv_total,
+            invoice_paid=inv_paid,
+            invoice_pending_due=inv_due,
             metadata_=apt.metadata_,
             tenant_id=apt.tenant_id,
             branch_id=apt.branch_id,
@@ -117,42 +144,61 @@ class AppointmentService:
             
         self.db.add(appointment)
 
-        # Auto-create pending consultation invoice if fee is charged
+        # Auto-create consultation invoice through BillingService SSOT if fee is charged
         if data.consultation_fee and float(data.consultation_fee) > 0:
-            from app.modules.billing.model import Invoice, InvoiceStatus
-            from app.core.models.branch import Branch
-            import uuid
-            fee = float(data.consultation_fee)
+            from app.modules.billing.service import BillingService
+            from app.modules.billing.schemas import InvoiceCreate, InvoiceItem
+            from decimal import Decimal
 
-            branch_code = None
-            if branch_id:
-                b = await self.db.get(Branch, branch_id)
-                if b and b.code:
-                    branch_code = b.code
+            fee = Decimal(str(data.consultation_fee))
+            paid = Decimal(str(data.paid_amount or 0))
+            disc = Decimal(str(data.discount or 0))
 
-            prefix = f"INV-OPD-{branch_code}" if branch_code else "INV-OPD"
-            inv_num = f"{prefix}-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
-            invoice = Invoice(
-                invoice_number=inv_num,
+            raw_vt = (data.visit_type or "consultation").lower()
+            if "tvs" in raw_vt or "scan" in raw_vt:
+                visit_label = "TVS Follicular Scan"
+            elif "opu" in raw_vt:
+                visit_label = "OPU (Egg Retrieval)"
+            elif "et" in raw_vt or "embryo" in raw_vt:
+                visit_label = "Embryo Transfer"
+            elif "semen" in raw_vt:
+                visit_label = "Semen Analysis"
+            elif "iui" in raw_vt:
+                visit_label = "IUI Insemination"
+            else:
+                visit_label = raw_vt.replace("visit_", "").replace("_", " ").title()
+
+            billing_service = BillingService(self.db)
+            pay_method = data.payment_method or ("cash" if paid > Decimal("0") else "pending")
+            invoice_create = InvoiceCreate(
                 patient_id=data.patient_id,
                 appointment_source="OP",
-                reason_for_attendance=f"OPD Consultation - {doctor.name}",
-                items=[{
-                    "item_code": "CONS-OPD",
-                    "item_name": f"Consultation Fee - {doctor.name}",
-                    "quantity": 1,
-                    "unit_price": fee,
-                    "total_price": fee
-                }],
-                subtotal=fee,
-                total_amount=fee,
-                status=InvoiceStatus.PENDING,
-                tenant_id=tenant_id,
-                branch_id=branch_id,
+                source_module="opd",
+                source_reference_id=appointment.id,
+                reason_for_attendance=f"OPD: {visit_label} - {doctor.name}",
+                items=[
+                    InvoiceItem(
+                        description=f"{visit_label} - {doctor.name}",
+                        quantity=1,
+                        unit_price=fee,
+                        total=fee,
+                        service_code="CONS-OPD"
+                    )
+                ],
+                discount=disc,
+                paid_amount=paid,
+                payment_method=pay_method,
+                upi_pay_mode=data.upi_pay_mode,
                 created_by=data.doctor_id,
-                notes=f"Generated upon OPD Queue check-in for {patient.name}"
+                branch_id=branch_id,
+                notes=f"Generated upon appointment booking for {patient.name}"
             )
-            self.db.add(invoice)
+            created_inv = await billing_service.create_invoice(invoice_create, tenant_id=tenant_id)
+            appointment.invoice_id = created_inv.id
+            meta["invoice_id"] = str(created_inv.id)
+            meta["invoice_number"] = created_inv.invoice_number
+            meta["invoice_status"] = created_inv.status
+            appointment.metadata_ = meta
 
         await self.db.flush()
         await self.db.refresh(appointment)
@@ -161,7 +207,7 @@ class AppointmentService:
     async def get_appointment(self, appointment_id: UUID) -> AppointmentResponse:
         query = (
             select(Appointment)
-            .options(selectinload(Appointment.patient), selectinload(Appointment.doctor))
+            .options(selectinload(Appointment.patient), selectinload(Appointment.doctor), selectinload(Appointment.invoice))
             .where(Appointment.id == appointment_id)
         )
         result = await self.db.execute(query)
@@ -171,7 +217,7 @@ class AppointmentService:
         return self._build_response(apt, apt.patient, apt.doctor)
 
     async def list_appointments(self, filters: dict, tenant_id: UUID = None):
-        query = select(Appointment).options(selectinload(Appointment.patient), selectinload(Appointment.doctor))
+        query = select(Appointment).options(selectinload(Appointment.patient), selectinload(Appointment.doctor), selectinload(Appointment.invoice))
         
         if tenant_id:
             query = query.where(Appointment.tenant_id == tenant_id)

@@ -245,6 +245,105 @@ def s_get(row: dict, key: str, default: str = "") -> str:
     return str(val).strip()
 
 
+def s_get_multi(row: dict, *keys: str, default: str = "") -> str:
+    for k in keys:
+        v = s_get(row, k)
+        if v:
+            return v
+    return default
+
+
+def clean_float(val: Any, default: float = 0.0) -> float:
+    if val is None:
+        return default
+    s = str(val).strip()
+    if not s:
+        return default
+    import re
+    cleaned = re.sub(r"[^\d.-]", "", s.replace(",", ""))
+    try:
+        return float(cleaned)
+    except Exception:
+        return default
+
+
+def clean_int(val: Any, default: int = 0) -> int:
+    if val is None:
+        return default
+    s = str(val).strip()
+    if not s:
+        return default
+    import re
+    cleaned = re.sub(r"[^\d.-]", "", s.replace(",", ""))
+    try:
+        return int(float(cleaned))
+    except Exception:
+        return default
+
+
+def parse_date_flexible(val: Any) -> Optional[date]:
+    if not val:
+        return None
+    s = str(val).strip().split("T")[0].split(" ")[0].strip()
+    if not s:
+        return None
+
+    # Try ISO format YYYY-MM-DD
+    try:
+        return date.fromisoformat(s)
+    except Exception:
+        pass
+
+    # Common delimiter splits: - or /
+    for delim in ["-", "/"]:
+        if delim in s:
+            parts = s.split(delim)
+            if len(parts) == 3:
+                # Year first: YYYY/MM/DD
+                if len(parts[0]) == 4:
+                    try:
+                        return date(int(parts[0]), int(parts[1]), int(parts[2]))
+                    except Exception:
+                        pass
+                # Year last: DD/MM/YYYY or MM/DD/YYYY
+                elif len(parts[2]) in [2, 4]:
+                    y = int(parts[2])
+                    if y < 100:
+                        y += 2000
+                    p0, p1 = int(parts[0]), int(parts[1])
+                    # If first part > 12, definitely DD/MM/YYYY
+                    if p0 > 12:
+                        try:
+                            return date(y, p1, p0)
+                        except Exception:
+                            pass
+                    else:
+                        # Default Indian/Commonwealth standard: DD/MM/YYYY
+                        try:
+                            return date(y, p1, p0)
+                        except Exception:
+                            try:
+                                return date(y, p0, p1)
+                            except Exception:
+                                pass
+            elif len(parts) == 2:
+                # Month and Year only: MM/YYYY or MM/YY
+                try:
+                    m = int(parts[0])
+                    y = int(parts[1])
+                    if y < 100:
+                        y += 2000
+                    if 1 <= m <= 12:
+                        import calendar
+                        last_day = calendar.monthrange(y, m)[1]
+                        return date(y, m, last_day)
+                except Exception:
+                    pass
+
+    return None
+
+
+
 # =====================================================================
 # Live Data Exporters
 # =====================================================================
@@ -767,11 +866,12 @@ async def preview_domain_csv(
             display_name = v_name
             is_override = v_name.lower().strip() in existing_set
         elif d_key in ["pharmacy_stock", "pharmacy", "stock"]:
-            b_num = s_get(r, "batch_number")
-            sku = s_get(r, "item_code") or s_get(r, "item_name") or b_num
-            ident = f"Batch {b_num}"
-            display_name = f"{sku} (Qty: {s_get(r, 'quantity_available') or s_get(r, 'quantity') or 0})"
-            is_override = b_num.lower().strip() in existing_set
+            b_num = s_get_multi(r, "batch_number", "batch_no", "batchno", "batch_num", "batch", "lot_number", "lot_no", "lot")
+            sku = s_get_multi(r, "item_code", "item_name", "medicine_name", "drug_name", "product_name", "name", "item") or b_num or f"Row {row_num}"
+            qty = clean_int(s_get_multi(r, "quantity_available", "quantity", "qty", "stock", "avail_qty", "quantity_received"))
+            ident = f"Batch {b_num}" if b_num else f"Row {row_num}"
+            display_name = f"{sku} (Qty: {qty})"
+            is_override = bool(b_num and b_num.lower().strip() in existing_set)
         elif d_key == "patients":
             p_phone = s_get(r, "phone").strip()
             p_name = f"{s_get(r, 'first_name')} {s_get(r, 'last_name')}".strip() or s_get(r, "name") or p_phone
@@ -1356,59 +1456,97 @@ async def import_domain_csv(
                             session.add(v_obj)
                             stats["created"] += 1
                 else:
-                    b_num = s_get(r, "batch_number")
-                    i_code = s_get(r, "item_code") or s_get(r, "item_name") or f"MED-{b_num}"
-                    i_name = s_get(r, "item_name") or s_get(r, "item_code") or b_num
+                    b_num = s_get_multi(r, "batch_number", "batch_no", "batchno", "batch_num", "batch", "lot_number", "lot_no", "lot")
+                    i_name = s_get_multi(r, "item_name", "medicine_name", "drug_name", "product_name", "name", "item", "medicine")
+                    i_code = s_get_multi(r, "item_code", "code", "sku", "drug_code", "item_id", "product_code")
                     if not b_num:
-                        continue
-                    b_code = s_get(r, "branch_code").upper()
+                        b_num = f"B-{uuid4().hex[:6].upper()}"
+                    if not i_code and i_name:
+                        clean_n = "".join(c for c in i_name if c.isalnum() or c in "-_")[:8].upper()
+                        i_code = f"MED-{clean_n}"
+                    elif not i_code:
+                        i_code = f"MED-{b_num}"
+                    if not i_name:
+                        i_name = i_code or b_num
+
+                    i_code = i_code[:50]
+                    i_name = i_name[:150]
+                    b_num = b_num[:50]
+
+                    generic_name = s_get_multi(r, "generic_name", "generic", "composition", "molecule", "salt")
+                    if generic_name:
+                        generic_name = generic_name[:150]
+                    category = s_get_multi(r, "category", "dept", "department", "type", "group") or "General Pharmacy"
+                    category = category[:100]
+                    rack_loc = s_get_multi(r, "rack_location", "rack", "location", "shelf", "bin") or "Rack A-01"
+                    rack_loc = rack_loc[:50]
+
+                    b_code = s_get_multi(r, "branch_code", "branch", "facility").upper()
                     target_b = branches.get(b_code) or primary_branch
-                    q_b = select(InventoryBatch).where(InventoryBatch.tenant_id == hospital.id, InventoryBatch.batch_number == b_num)
+                    branch_id = target_b.id if target_b else None
+
+                    q_b = select(InventoryBatch).where(
+                        InventoryBatch.tenant_id == hospital.id,
+                        InventoryBatch.batch_number == b_num,
+                    )
+                    if branch_id:
+                        q_b = q_b.where(or_(InventoryBatch.branch_id == branch_id, InventoryBatch.branch_id.is_(None)))
                     res_b = await session.execute(q_b)
-                    existing_b = res_b.scalar_one_or_none()
-                    qty = int(float(s_get(r, "quantity_available") or s_get(r, "quantity") or s_get(r, "quantity_received") or 0))
-                    purchase_rate = float(s_get(r, "purchase_rate") or 0.0)
-                    mrp = float(s_get(r, "mrp") or 0.0)
-                    selling_price = float(s_get(r, "selling_price") or mrp or 0.0)
+                    existing_b = res_b.scalars().first()
+
+                    qty_avail = clean_int(s_get_multi(r, "quantity_available", "quantity", "qty", "stock", "avail_qty", "available_quantity", "current_stock"))
+                    qty_rec = clean_int(s_get_multi(r, "quantity_received", "received_qty", "qty_received", "qty_rec"))
+                    qty = qty_avail if qty_avail > 0 else (qty_rec if qty_rec > 0 else 0)
+                    rec_qty = qty_rec if qty_rec > 0 else qty
+
+                    purchase_rate = clean_float(s_get_multi(r, "purchase_rate", "purchase_price", "cost_price", "cost", "buy_rate", "buy_price", "pur_rate"))
+                    mrp = clean_float(s_get_multi(r, "mrp", "maximum_retail_price", "retail_price"))
+                    selling_price = clean_float(s_get_multi(r, "selling_price", "sell_price", "sale_price", "sale_rate", "rate", "unit_price", "price"))
+
+                    # Ensure selling_price and mrp are never 0 if either is available
+                    if selling_price <= 0.0:
+                        if mrp > 0.0:
+                            selling_price = mrp
+                        elif purchase_rate > 0.0:
+                            selling_price = round(purchase_rate * 1.15, 2)
+                    if mrp <= 0.0 and selling_price > 0.0:
+                        mrp = selling_price
+
+                    exp_raw = s_get_multi(r, "expiry_date", "expiry", "exp_date", "exp", "expdate")
+                    exp_date = parse_date_flexible(exp_raw) or (date.today() + timedelta(days=365))
+
                     if existing_b:
                         if conflict_mode == "overwrite":
                             existing_b.quantity_available = qty
-                            existing_b.quantity_received = max(existing_b.quantity_received or 0, qty)
+                            existing_b.quantity_received = max(existing_b.quantity_received or 0, rec_qty)
                             existing_b.mrp = mrp
                             existing_b.selling_price = selling_price
                             existing_b.purchase_rate = purchase_rate
-                            if s_get(r, "generic_name"):
-                                existing_b.generic_name = s_get(r, "generic_name")
-                            if s_get(r, "category"):
-                                existing_b.category = s_get(r, "category")
-                            if s_get(r, "rack_location"):
-                                existing_b.rack_location = s_get(r, "rack_location")
+                            if generic_name:
+                                existing_b.generic_name = generic_name
+                            if category:
+                                existing_b.category = category
+                            if rack_loc:
+                                existing_b.rack_location = rack_loc
                             stats["updated"] += 1
                         else:
                             stats["skipped"] += 1
                     else:
-                        exp_str = s_get(r, "expiry_date")
-                        exp_date = None
-                        if exp_str:
-                            try:
-                                exp_date = date.fromisoformat(exp_str[:10])
-                            except Exception:
-                                pass
                         new_batch = InventoryBatch(
                             tenant_id=hospital.id,
-                            branch_id=target_b.id,
+                            branch_id=branch_id,
                             item_code=i_code,
                             item_name=i_name,
-                            generic_name=s_get(r, "generic_name"),
-                            category=s_get(r, "category") or "Fertility / Injectables",
+                            generic_name=generic_name,
+                            category=category,
                             batch_number=b_num,
-                            expiry_date=exp_date or date(2027, 12, 31),
-                            quantity_received=qty,
+                            expiry_date=exp_date,
+                            quantity_received=rec_qty,
                             quantity_available=qty,
                             purchase_rate=purchase_rate,
                             mrp=mrp,
                             selling_price=selling_price,
-                            rack_location=s_get(r, "rack_location") or "Cold Chain Fridge 1",
+                            rack_location=rack_loc,
                             is_active=True
                         )
                         session.add(new_batch)

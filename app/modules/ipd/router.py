@@ -148,6 +148,18 @@ async def admit_patient(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.get("/admissions/{admission_id}/discharge-summary")
+@router.get("/admissions/{admission_id}/discharge-summary/")
+async def get_discharge_summary(
+    admission_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.calculate_discharge_summary(admission_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 @router.post("/admissions/{admission_id}/discharge")
 @router.post("/admissions/{admission_id}/discharge/")
 async def discharge_patient(

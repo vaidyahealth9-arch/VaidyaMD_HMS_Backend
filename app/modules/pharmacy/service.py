@@ -114,7 +114,8 @@ class PharmacyService:
                 deduct_qty = min(batch.quantity_available, qty_needed)
                 batch.quantity_available -= deduct_qty
                 qty_needed -= deduct_qty
-                item_cost = deduct_qty * batch.selling_price
+                item_price = batch.selling_price if (batch.selling_price and batch.selling_price > 0) else (batch.mrp if (batch.mrp and batch.mrp > 0) else (batch.purchase_rate or 0.0))
+                item_cost = deduct_qty * item_price
                 total_bill += item_cost
 
                 dispensed_items_audit.append({
@@ -123,60 +124,83 @@ class PharmacyService:
                     "batch_number": batch.batch_number,
                     "expiry_date": batch.expiry_date.isoformat(),
                     "quantity_dispensed": deduct_qty,
-                    "unit_price": batch.selling_price,
+                    "unit_price": item_price,
                     "total_price": item_cost,
                     "rack_location": batch.rack_location,
                 })
 
-        total_bill = round(total_bill, 2)
-        discount = float(payload.discount or 0.0)
-        net_amount = max(0.0, round(total_bill - discount, 2))
-        amount_paid = float(payload.amount_paid) if payload.amount_paid is not None else net_amount
-        pay_status = (
-            InvoiceStatus.PAID if amount_paid >= net_amount
-            else (InvoiceStatus.PARTIALLY_PAID if amount_paid > 0 else InvoiceStatus.PENDING)
-        )
-        pay_method = payload.payment_method or "Cash"
+        from app.modules.billing.service import BillingService
+        from app.modules.billing.schemas import InvoiceCreate, InvoiceItem, SplitPaymentItem
+        from decimal import Decimal
+
+        invoice_items = [
+            InvoiceItem(
+                description=f"{it['item_name']} (Batch {it['batch_number']})",
+                quantity=it['quantity_dispensed'],
+                unit_price=Decimal(str(it['unit_price'])),
+                total=Decimal(str(it['total_price'])),
+                service_code=it['item_code']
+            )
+            for it in dispensed_items_audit
+        ]
+
+        total_bill = sum(it.total for it in invoice_items)
+        discount = Decimal(str(payload.discount or 0.0))
+        net_amount = max(Decimal("0.0"), total_bill - discount)
+        amount_paid = Decimal(str(payload.amount_paid)) if payload.amount_paid is not None else net_amount
+        wallet_used = Decimal(str(getattr(payload, 'wallet_amount_used', 0.0) or 0.0))
+
+        split_items = None
+        if getattr(payload, "split_payments", None):
+            split_items = [
+                SplitPaymentItem(
+                    payment_method=sp.get("payment_method", "cash"),
+                    upi_pay_mode=sp.get("upi_pay_mode"),
+                    amount=Decimal(str(sp.get("amount", 0))),
+                    reference=sp.get("reference"),
+                    notes=sp.get("notes"),
+                )
+                for sp in payload.split_payments
+            ]
+
         note_str = payload.notes or "Dispensed via Pharmacy FEFO engine"
         if payload.payment_ref:
             note_str += f" | Payment Ref: {payload.payment_ref}"
 
-        inv_prefix = f"INV-PHARMA-{branch_code}" if branch_code else "INV-PHARMA"
-        inv_num = f"{inv_prefix}-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
-        invoice = Invoice(
-            invoice_number=inv_num,
+        billing_service = BillingService(self.db)
+        invoice_create = InvoiceCreate(
             patient_id=payload.patient_id,
             appointment_source="Pharmacy",
+            source_module="pharmacy",
+            source_reference_id=getattr(payload, "indent_id", None),
             reason_for_attendance="Point of Sale Pharmacy Dispense",
-            subtotal=total_bill,
+            items=invoice_items,
             discount=discount,
-            total_amount=net_amount,
             paid_amount=amount_paid,
-            status=pay_status,
-            payment_method=pay_method,
-            items=dispensed_items_audit,
+            wallet_amount_used=wallet_used,
+            payment_method=payload.payment_method or "Cash",
+            upi_pay_mode=getattr(payload, "upi_pay_mode", None),
+            split_payments=split_items,
             notes=note_str,
-            tenant_id=tenant_id,
-            branch_id=branch_id,
             created_by=creator_id,
+            branch_id=branch_id,
         )
-        self.db.add(invoice)
-        await self.db.flush()
-        await self.db.refresh(invoice)
+        invoice_resp = await billing_service.create_invoice(invoice_create, tenant_id=tenant_id)
 
         return {
             "message": "Medications dispensed successfully via FEFO logic.",
-            "invoice_id": str(invoice.id),
-            "invoice_number": inv_num,
-            "invoice_status": invoice.status.value if hasattr(invoice.status, 'value') else str(invoice.status),
-            "subtotal": total_bill,
-            "discount": discount,
-            "total_amount": net_amount,
-            "paid_amount": amount_paid,
-            "payment_method": pay_method,
+            "invoice_id": str(invoice_resp.id),
+            "invoice_number": invoice_resp.invoice_number,
+            "invoice_status": invoice_resp.status,
+            "subtotal": float(invoice_resp.subtotal),
+            "discount": float(invoice_resp.discount),
+            "total_amount": float(invoice_resp.total_amount),
+            "paid_amount": float(invoice_resp.paid_amount),
+            "payment_method": invoice_resp.payment_method,
             "patient_name": patient.name,
             "patient_mrn": patient.vid or "",
             "created_at": datetime.utcnow().isoformat(),
+            "items": invoice_resp.items,
             "dispensed_batches": dispensed_items_audit,
         }
 

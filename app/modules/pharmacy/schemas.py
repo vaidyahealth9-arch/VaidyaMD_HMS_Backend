@@ -48,6 +48,9 @@ class DispenseRequest(BaseModel):
     notes: Optional[str] = None
     branch_id: Optional[UUID] = None
     payment_method: Optional[str] = "Cash"
+    upi_pay_mode: Optional[str] = None
     payment_ref: Optional[str] = None
     discount: Optional[float] = 0.0
     amount_paid: Optional[float] = None
+    wallet_amount_used: Optional[float] = 0.0
+    split_payments: Optional[List[dict]] = None

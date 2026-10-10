@@ -44,55 +44,89 @@ async def get_db() -> AsyncSession:
 
 async def init_db():
     """Create all tables and run safe additive schema migrations."""
+    # 1. Run enum additions outside transaction block (Postgres requires autocommit for ALTER TYPE)
+    try:
+        async with engine.connect() as autocommit_conn:
+            await autocommit_conn.execution_options(isolation_level="AUTOCOMMIT")
+            for enum_val in ("counsellor", "COUNSELLOR"):
+                try:
+                    await autocommit_conn.execute(text(f"ALTER TYPE userrole ADD VALUE IF NOT EXISTS '{enum_val}';"))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 2. Synchronize tables and columns within transaction, protected by savepoints
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        migrations = [
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS qualification VARCHAR(255);",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS reg_number VARCHAR(100);",
+            "ALTER TABLE treatment_cycle_types ADD COLUMN IF NOT EXISTS category VARCHAR(100);",
+            "ALTER TABLE branches ADD COLUMN IF NOT EXISTS gstin VARCHAR(50);",
+            "ALTER TABLE branches ADD COLUMN IF NOT EXISTS receipt_header JSONB DEFAULT '{}'::jsonb;",
+            "ALTER TABLE branches ADD COLUMN IF NOT EXISTS ip_whitelist JSONB DEFAULT '[]'::jsonb;",
+            "ALTER TABLE treatment_cycles ADD COLUMN IF NOT EXISTS medication_calendar JSONB DEFAULT '[]'::jsonb;",
+            "ALTER TABLE treatment_cycles ADD COLUMN IF NOT EXISTS et_discharge_summary JSONB DEFAULT '{}'::jsonb;",
+            "ALTER TABLE protocol_templates ADD COLUMN IF NOT EXISTS timeline_events JSONB DEFAULT '[]'::jsonb;",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS marketing_person_name VARCHAR(255);",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS referring_doctor VARCHAR(255);",
+            "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);",
+            "ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);",
+            # Unified Billing schema extensions
+            "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source_module VARCHAR(100) DEFAULT 'opd';",
+            "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source_reference_id UUID;",
+            "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_transactions JSONB DEFAULT '[]'::jsonb;",
+            "ALTER TABLE ipd_admissions ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id);",
+            "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id);",
+            "ALTER TABLE clinical_records ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id);",
+            "ALTER TABLE counseling_notes ADD COLUMN IF NOT EXISTS comments TEXT;",
+        ]
+
+        for stmt in migrations:
+            try:
+                async with conn.begin_nested():
+                    await conn.execute(text(stmt))
+            except Exception:
+                pass
+
         try:
-            await conn.execute(text("ALTER TABLE treatment_cycles ADD COLUMN IF NOT EXISTS medication_calendar JSONB DEFAULT '[]'::jsonb;"))
-            await conn.execute(text("ALTER TABLE treatment_cycles ADD COLUMN IF NOT EXISTS et_discharge_summary JSONB DEFAULT '{}'::jsonb;"))
-            await conn.execute(text("ALTER TABLE protocol_templates ADD COLUMN IF NOT EXISTS timeline_events JSONB DEFAULT '[]'::jsonb;"))
-            await conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS marketing_person_name VARCHAR(255);"))
-            await conn.execute(text("ALTER TABLE patients ADD COLUMN IF NOT EXISTS referring_doctor VARCHAR(255);"))
-            await conn.execute(text("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);"))
-            await conn.execute(text("ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);"))
-            # New: treatment cycle type lookup (auto-created by create_all but guard here)
-            await conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS treatment_cycle_types (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    name VARCHAR(150) NOT NULL UNIQUE,
-                    display_order INTEGER DEFAULT 0,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT NOW()
-                );
-            """))
-            try:
-                await conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'counsellor';"))
-                await conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'COUNSELLOR';"))
-            except Exception:
-                pass
-            await conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS counseling_notes (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-                    tenant_id UUID NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE,
-                    branch_id UUID REFERENCES branches(id) ON DELETE SET NULL,
-                    counselor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    source VARCHAR(255),
-                    comments TEXT,
-                    procedure VARCHAR(255),
-                    egg_pick_up TEXT,
-                    discussion TEXT,
-                    laparoscopy_hysteroscopy TEXT,
-                    egg_transfer TEXT,
-                    remarks TEXT,
-                    signature VARCHAR(255),
-                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
-                    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-                );
-            """))
-            try:
-                await conn.execute(text("ALTER TABLE counseling_notes ADD COLUMN IF NOT EXISTS comments TEXT;"))
-            except Exception:
-                pass
+            async with conn.begin_nested():
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS treatment_cycle_types (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        name VARCHAR(150) NOT NULL UNIQUE,
+                        display_order INTEGER DEFAULT 0,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    );
+                """))
+        except Exception:
+            pass
+
+        try:
+            async with conn.begin_nested():
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS counseling_notes (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+                        tenant_id UUID NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE,
+                        branch_id UUID REFERENCES branches(id) ON DELETE SET NULL,
+                        counselor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        source VARCHAR(255),
+                        comments TEXT,
+                        procedure VARCHAR(255),
+                        egg_pick_up TEXT,
+                        discussion TEXT,
+                        laparoscopy_hysteroscopy TEXT,
+                        egg_transfer TEXT,
+                        remarks TEXT,
+                        signature VARCHAR(255),
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    );
+                """))
         except Exception:
             pass
 

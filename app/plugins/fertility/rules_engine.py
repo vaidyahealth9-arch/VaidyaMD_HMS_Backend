@@ -214,7 +214,7 @@ def generate_hrt_fet_calendar(
 def generate_medication_calendar(
     rules: list[dict[str, Any]],
     sentinel_dates: dict[str, Any],
-    total_days: int = 21,
+    total_days: Optional[int] = None,
     treatment_type: Optional[str] = None,
     timeline_events: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
@@ -231,7 +231,7 @@ def generate_medication_calendar(
         "FET" in str(treatment_type or "").upper()
     )
     if is_fet and not rules:
-        return generate_hrt_fet_calendar(sentinel_dates, total_days=max(23, total_days))
+        return generate_hrt_fet_calendar(sentinel_dates, total_days=total_days or 28)
 
     lmp = parse_date(sentinel_dates.get("lmp_day1"))
     stim_start = parse_date(sentinel_dates.get("stim_start"))
@@ -251,18 +251,22 @@ def generate_medication_calendar(
     event_starts = [int(e.get("day_offset", 1)) for e in (timeline_events or [])] if timeline_events else [1]
     min_offset = min(rule_starts + event_starts + [1])
     
-    rule_ends = [int(r.get("day_end_offset", total_days)) for r in rules] if rules else [total_days]
-    event_ends = [int(e.get("day_offset", total_days)) for e in (timeline_events or [])] if timeline_events else [total_days]
-    max_offset = max(rule_ends + event_ends + [total_days, 14])
+    if total_days is not None:
+        max_offset = total_days
+    else:
+        rule_ends = [int(r.get("day_end_offset", r.get("day_start_offset", 1))) for r in rules] if rules else [14]
+        event_ends = [int(e.get("day_offset", 1)) for e in (timeline_events or [])] if timeline_events else [14]
+        max_offset = max(rule_ends + event_ends + [14])
 
     # Date boundaries
     cycle_start_date = anchor_base + timedelta(days=min_offset - 1 if min_offset <= 0 else 0)
     cycle_end_date = anchor_base + timedelta(days=max_offset - 1)
 
-    if et and et > cycle_end_date:
-        cycle_end_date = et + timedelta(days=2)
-    if beta_hcg and beta_hcg > cycle_end_date:
-        cycle_end_date = beta_hcg + timedelta(days=1)
+    if total_days is None:
+        if et and et > cycle_end_date:
+            cycle_end_date = et + timedelta(days=2)
+        if beta_hcg and beta_hcg > cycle_end_date:
+            cycle_end_date = beta_hcg + timedelta(days=1)
 
     calendar_days: list[dict[str, Any]] = []
     is_iui = "IUI" in str(treatment_type or "").upper() or "OI" in str(treatment_type or "").upper()
@@ -271,11 +275,11 @@ def generate_medication_calendar(
     if lmp:
         milestone_map[lmp] = "Day 1 (LMP)"
     if baseline:
-        milestone_map[baseline] = "Baseline Scan"
+        milestone_map[baseline] = "Baseline Scan 🔍"
     if stim_start:
-        milestone_map[stim_start] = "Stimulation Start"
+        milestone_map[stim_start] = "Stimulation Start · Baseline Scan 🔍"
     if d12_scan:
-        milestone_map[d12_scan] = "D12 Endometrial Scan"
+        milestone_map[d12_scan] = "D12 Endometrial Scan 🔍"
     if p0_date:
         milestone_map[p0_date] = "P0 (Progesterone Start)"
     if trigger:
@@ -321,6 +325,40 @@ def generate_medication_calendar(
                 milestone = f"{scans[0]} 🔍"
             elif investigations and "Beta" in investigations[0]:
                 milestone = f"{investigations[0]} 🩸"
+            elif not is_iui and not is_fet:
+                if offset_from_anchor == 1:
+                    milestone = "Stim Day 1 · Baseline Scan 🔍"
+                elif offset_from_anchor == 6:
+                    milestone = "Antagonist Start"
+                elif offset_from_anchor == 10:
+                    milestone = "Trigger Evaluation / Scan 🔍"
+                elif offset_from_anchor == 12:
+                    milestone = "hCG / Agonist Trigger ⚡"
+                elif offset_from_anchor == 14:
+                    milestone = "OPU Ovum Pick-Up Retrieval 🧫"
+                elif offset_from_anchor == 15:
+                    milestone = "Fertilization Check (D1) 🔬"
+                elif offset_from_anchor == 17:
+                    milestone = "D3 Cleavage Embryo Check / Transfer Window 👶"
+                elif offset_from_anchor == 19:
+                    milestone = "D5 Blastocyst Transfer Window 👶"
+                elif offset_from_anchor == 28:
+                    milestone = "Beta-hCG Pregnancy Test 🩸"
+            elif is_iui:
+                if offset_from_anchor == 1:
+                    milestone = "Cycle Day 1 (LMP)"
+                elif offset_from_anchor == 2:
+                    milestone = "Ovulation Induction Start"
+                elif offset_from_anchor == 8:
+                    milestone = "Follicular Tracking Scan 🔍"
+                elif offset_from_anchor == 11:
+                    milestone = "Trigger Evaluation"
+                elif offset_from_anchor == 12:
+                    milestone = "hCG Trigger ⚡"
+                elif offset_from_anchor == 14:
+                    milestone = "IUI Insemination 💉"
+                elif offset_from_anchor == 28:
+                    milestone = "Beta-hCG Pregnancy Test 🩸"
 
         # Day Labeling
         if offset_from_anchor <= 0:

@@ -41,6 +41,28 @@ def require_super_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+def check_domain_access(domain: str, current_user: User) -> None:
+    """Validate domain-specific permission (e.g. pharmacy stock import for pharmacists/doctors/admin)."""
+    role_str = (current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)).lower()
+    if role_str == "admin":
+        return
+    d_clean = domain.lower().replace("-", "_")
+    if any(k in d_clean for k in ["pharmacy", "stock", "vendor", "11"]):
+        if role_str in ["pharma", "pharmacist", "manager", "accounts", "doctor", "staff"]:
+            return
+    if any(k in d_clean for k in ["lims", "lab", "09"]):
+        if role_str in ["embryologist", "andrologist", "doctor", "manager", "staff"]:
+            return
+    if any(k in d_clean for k in ["patient", "12"]):
+        if role_str in ["receptionist", "nurse", "doctor", "manager"]:
+            return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Access Denied: Operating on domain '{domain}' requires administrative or departmental privileges.",
+    )
+
+
+
 # --- Schemas ---
 
 class BranchReceiptHeaderUpdate(BaseModel):
@@ -196,7 +218,7 @@ def resolve_domain_spec(domain_name: str) -> tuple[str, dict] | tuple[None, None
 async def download_csv_template_or_export(
     domain: str,
     mode: str = Query("blank", pattern="^(blank|export)$"),
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -204,6 +226,7 @@ async def download_csv_template_or_export(
     - mode=blank: Downloads empty RFC 4180 header template for manual filling.
     - mode=export: Exports live database records for current tenant into CSV format.
     """
+    check_domain_access(domain, current_user)
     resolved_key, spec = resolve_domain_spec(domain)
     if not resolved_key or not spec:
         raise HTTPException(status_code=404, detail=f"Unknown domain '{domain}'")
@@ -236,13 +259,14 @@ async def preview_csv_domain(
     domain: str,
     file: UploadFile = File(...),
     conflict_mode: str = Form("overwrite"),
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Preview CSV rows before saving. Detects which rows already exist in the database (overrides)
     versus new insertions, according to the specified conflict_mode ('overwrite' or 'skip').
     """
+    check_domain_access(domain, current_user)
     resolved_key, spec = resolve_domain_spec(domain)
     if not resolved_key or not spec:
         raise HTTPException(status_code=404, detail=f"Unknown domain '{domain}'")
@@ -287,7 +311,7 @@ async def import_csv_domain(
     file: UploadFile = File(...),
     conflict_mode: str = Form("overwrite"),
     dry_run: bool = Form(False),
-    current_user: User = Depends(require_super_admin),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -295,6 +319,7 @@ async def import_csv_domain(
     Supports conflict_mode: 'overwrite' (upsert) or 'skip' (preserve existing).
     If dry_run is True, returns preview stats without committing changes.
     """
+    check_domain_access(domain, current_user)
     resolved_key, spec = resolve_domain_spec(domain)
     if not resolved_key or not spec:
         raise HTTPException(status_code=404, detail=f"Unknown domain '{domain}'")

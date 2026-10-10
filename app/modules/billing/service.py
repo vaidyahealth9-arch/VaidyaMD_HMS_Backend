@@ -66,9 +66,31 @@ class BillingService:
         ]
 
 
-    async def generate_invoice_number(self, branch_code: Optional[str] = None) -> str:
-        code_prefix = f"INV-{branch_code.upper()}" if branch_code else "VMD-INV"
-        result = await self.db.execute(select(func.count(Invoice.id)))
+    async def generate_invoice_number(self, branch_code: Optional[str] = None, source_module: Optional[str] = None) -> str:
+        dept_tag = "MAIN"
+        if source_module:
+            mod_lower = source_module.lower().strip()
+            if "pharm" in mod_lower:
+                dept_tag = "PHARMA"
+            elif "lab" in mod_lower or "lims" in mod_lower:
+                dept_tag = "LAB"
+            elif "ipd" in mod_lower:
+                dept_tag = "IPD"
+            elif "art" in mod_lower or "ivf" in mod_lower or "fertil" in mod_lower:
+                dept_tag = "ART"
+            elif "cos" in mod_lower:
+                dept_tag = "COSGYN"
+            elif "counsel" in mod_lower:
+                dept_tag = "COUNSEL"
+            elif branch_code and branch_code.upper() != "MAIN":
+                dept_tag = branch_code.upper()
+            else:
+                dept_tag = "MAIN"
+        elif branch_code:
+            dept_tag = branch_code.upper()
+
+        code_prefix = f"INV-{dept_tag}"
+        result = await self.db.execute(select(func.count(Invoice.id)).where(Invoice.invoice_number.like(f"{code_prefix}-%")))
         count = result.scalar() or 0
         base_num = count + 1
         for attempt in range(100):
@@ -89,6 +111,8 @@ class BillingService:
             patient_name=patient.name if patient else None,
             patient_vid=patient.vid if patient else None,
             appointment_source=invoice.appointment_source or "OP",
+            source_module=getattr(invoice, "source_module", None) or (invoice.appointment_source or "opd").lower(),
+            source_reference_id=getattr(invoice, "source_reference_id", None),
             reason_for_attendance=invoice.reason_for_attendance,
             items=invoice.items,
             subtotal=invoice.subtotal,
@@ -102,6 +126,7 @@ class BillingService:
             payment_method=invoice.payment_method,
             upi_pay_mode=invoice.upi_pay_mode,
             notes=invoice.notes,
+            payment_transactions=getattr(invoice, "payment_transactions", None) or [],
             tenant_id=invoice.tenant_id,
             branch_id=invoice.branch_id,
             created_at=invoice.created_at,
@@ -124,10 +149,101 @@ class BillingService:
         discount = data.discount
         if not discount and getattr(data, "discount_value", None):
             discount = Decimal(str(data.discount_value))
-        total = subtotal - discount + data.tax
+        total = max(Decimal("0"), subtotal - discount + data.tax)
 
-        initial_paid = Decimal(str(data.paid_amount or 0))
         wallet_used = Decimal(str(data.wallet_amount_used or data.wallet_deduction or 0))
+        payment_method = data.payment_method or "cash"
+        upi_pay_mode = data.upi_pay_mode
+
+        split_summary = []
+        tx_list = []
+        initial_paid = Decimal("0")
+
+        if getattr(data, "split_payments", None) and len(data.split_payments) > 0:
+            payment_method = "split"
+            wallet_used = Decimal("0")
+            for sp in data.split_payments:
+                sp_amt = Decimal(str(sp.amount or 0))
+                if sp_amt <= Decimal("0"):
+                    continue
+                initial_paid += sp_amt
+                m_str = sp.payment_method
+                if sp.upi_pay_mode:
+                    m_str += f" ({sp.upi_pay_mode})"
+                if sp.reference:
+                    m_str += f" [Ref: {sp.reference}]"
+                split_summary.append(f"{m_str}: ₹{sp_amt}")
+                if "wallet" in sp.payment_method.lower():
+                    wallet_used += sp_amt
+                tx_list.append({
+                    "id": str(uuid.uuid4()),
+                    "type": "payment",
+                    "amount": float(sp_amt),
+                    "payment_method": sp.payment_method,
+                    "upi_pay_mode": sp.upi_pay_mode,
+                    "reference": sp.reference,
+                    "notes": sp.notes or "Split tender payment",
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+        else:
+            is_full_paid = getattr(data, "payment_status", None) == "paid" or (
+                data.paid_amount is not None and Decimal(str(data.paid_amount)) >= total and total > Decimal("0")
+            )
+            if is_full_paid:
+                initial_paid = total
+                if wallet_used > Decimal("0"):
+                    tender_amt = max(Decimal("0"), total - wallet_used)
+                    tx_list.append({
+                        "id": str(uuid.uuid4()),
+                        "type": "payment",
+                        "amount": float(wallet_used),
+                        "payment_method": "wallet",
+                        "notes": "Patient advance wallet deduction",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+                    if tender_amt > Decimal("0"):
+                        tx_list.append({
+                            "id": str(uuid.uuid4()),
+                            "type": "payment",
+                            "amount": float(tender_amt),
+                            "payment_method": payment_method,
+                            "upi_pay_mode": upi_pay_mode,
+                            "notes": "Direct settlement",
+                            "timestamp": datetime.utcnow().isoformat(),
+                        })
+                else:
+                    if total > Decimal("0"):
+                        tx_list.append({
+                            "id": str(uuid.uuid4()),
+                            "type": "payment",
+                            "amount": float(total),
+                            "payment_method": payment_method,
+                            "upi_pay_mode": upi_pay_mode,
+                            "notes": "Full payment settlement",
+                            "timestamp": datetime.utcnow().isoformat(),
+                        })
+            else:
+                direct_tender = Decimal(str(data.paid_amount or 0))
+                initial_paid = direct_tender + wallet_used
+                if wallet_used > Decimal("0"):
+                    tx_list.append({
+                        "id": str(uuid.uuid4()),
+                        "type": "payment",
+                        "amount": float(wallet_used),
+                        "payment_method": "wallet",
+                        "notes": "Patient advance wallet deduction",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+                if direct_tender > Decimal("0"):
+                    tx_list.append({
+                        "id": str(uuid.uuid4()),
+                        "type": "payment",
+                        "amount": float(direct_tender),
+                        "payment_method": payment_method,
+                        "upi_pay_mode": upi_pay_mode,
+                        "notes": "Partial settlement",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
 
         wallet = None
         if wallet_used > Decimal("0"):
@@ -137,7 +253,6 @@ class BillingService:
                 avail = wallet.balance if wallet else Decimal("0")
                 raise InsufficientWalletBalanceError(f"Insufficient patient advance wallet balance (Available: ₹{avail})")
             wallet.balance -= wallet_used
-            initial_paid += wallet_used
 
         status = InvoiceStatus.PENDING
         if initial_paid >= total and total > Decimal("0"):
@@ -153,28 +268,42 @@ class BillingService:
                 "quantity": int(item.quantity),
                 "unit_price": float(item.unit_price),
                 "total": float(item.total),
+                "service_code": item.service_code,
+                "category": item.category,
+                "tax_rate": float(item.tax_rate) if item.tax_rate else 0.0,
             }
             for item in data.items
         ]
 
-        inv_num = await self.generate_invoice_number(branch_code=branch_code)
+        src_mod = (data.source_module or data.appointment_source or "opd").lower()
+        inv_num = await self.generate_invoice_number(branch_code=branch_code, source_module=src_mod)
+
+        combined_notes = data.notes or ""
+        if split_summary:
+            split_txt = f"Split Tenders: {', '.join(split_summary)}"
+            combined_notes = f"{combined_notes} | {split_txt}" if combined_notes else split_txt
+        if getattr(data, "discount_reason", None):
+            combined_notes = f"{combined_notes} | Discount Reason: {data.discount_reason}" if combined_notes else f"Discount Reason: {data.discount_reason}"
 
         invoice = Invoice(
             invoice_number=inv_num,
             patient_id=data.patient_id,
-            appointment_source=data.appointment_source or "OP",
+            appointment_source=data.appointment_source or src_mod.upper(),
+            source_module=src_mod,
+            source_reference_id=data.source_reference_id,
             reason_for_attendance=data.reason_for_attendance,
             items=serializable_items,
             subtotal=subtotal,
-            discount=data.discount,
+            discount=discount,
             tax=data.tax,
             total_amount=total,
             paid_amount=initial_paid,
             wallet_amount_used=wallet_used,
             status=status,
-            payment_method=data.payment_method or "cash",
-            upi_pay_mode=data.upi_pay_mode,
-            notes=data.notes,
+            payment_method=payment_method,
+            upi_pay_mode=upi_pay_mode,
+            notes=combined_notes or None,
+            payment_transactions=tx_list,
             created_by=user_creator,
             tenant_id=tenant_id,
             branch_id=branch_id,
@@ -182,9 +311,49 @@ class BillingService:
         self.db.add(invoice)
         await self.db.flush()
 
-        # Automatic Package Allocation if package_id was billed
-        if getattr(data, "package_id", None):
-            pkg = await self.db.get(TreatmentPackage, data.package_id)
+        # Bidirectional linkage if source_reference_id was provided
+        if data.source_reference_id:
+            try:
+                if src_mod == "ipd":
+                    from app.modules.ipd.model import IPDAdmission
+                    adm = await self.db.get(IPDAdmission, data.source_reference_id)
+                    if adm:
+                        adm.invoice_id = invoice.id
+                elif src_mod in ("opd", "appointments", "appointment"):
+                    from app.modules.appointments.model import Appointment
+                    app_obj = await self.db.get(Appointment, data.source_reference_id)
+                    if app_obj:
+                        app_obj.invoice_id = invoice.id
+                        if not app_obj.metadata_:
+                            app_obj.metadata_ = {}
+                        app_obj.metadata_["invoice_id"] = str(invoice.id)
+                        app_obj.metadata_["invoice_number"] = invoice.invoice_number
+                        flag_modified(app_obj, "metadata_")
+                elif src_mod == "lims":
+                    from app.core.models.clinical_record import ClinicalRecord
+                    rec = await self.db.get(ClinicalRecord, data.source_reference_id)
+                    if rec:
+                        rec.invoice_id = invoice.id
+            except Exception:
+                pass
+
+        # Automatic Package Allocation if package_id was billed or package source
+        target_pkg_id = getattr(data, "package_id", None)
+        if not target_pkg_id and (src_mod == "package" or any("package" in (it.category or "").lower() for it in data.items)):
+            for it in data.items:
+                pkg_match = await self.db.execute(
+                    select(TreatmentPackage).where(
+                        TreatmentPackage.tenant_id == tenant_id,
+                        func.lower(TreatmentPackage.name) == func.lower(it.description),
+                    )
+                )
+                matched_pkg = pkg_match.scalar_one_or_none()
+                if matched_pkg:
+                    target_pkg_id = matched_pkg.id
+                    break
+
+        if target_pkg_id:
+            pkg = await self.db.get(TreatmentPackage, target_pkg_id)
             if pkg and pkg.tenant_id == tenant_id:
                 items_allocated = []
                 for idx, it in enumerate(pkg.items or [], 1):
@@ -287,47 +456,227 @@ class BillingService:
             invoice.discount = (invoice.discount or Decimal("0")) + payload.discount
             invoice.total_amount = max(Decimal("0"), invoice.total_amount - payload.discount)
 
-        is_wallet = payload.payment_method and "wallet" in payload.payment_method.lower()
-        if is_wallet and payload.amount > Decimal("0"):
-            wallet_res = await self.db.execute(select(PatientWallet).where(PatientWallet.patient_id == invoice.patient_id))
-            wallet = wallet_res.scalar_one_or_none()
-            if not wallet or wallet.balance < payload.amount:
-                avail = wallet.balance if wallet else Decimal("0")
-                raise InsufficientWalletBalanceError(f"Insufficient patient advance wallet balance (Available: ₹{avail})")
+        total_payment_added = Decimal("0")
+        split_entries = []
+        is_split = bool(getattr(payload, "split_payments", None) and len(payload.split_payments) > 0)
 
-            wallet.balance -= payload.amount
-            invoice.wallet_amount_used = (invoice.wallet_amount_used or Decimal("0")) + payload.amount
+        if is_split:
+            for sp in payload.split_payments:
+                sp_amt = Decimal(str(sp.amount or 0))
+                if sp_amt <= Decimal("0"):
+                    continue
+                total_payment_added += sp_amt
 
-            w_tx = WalletTransaction(
-                wallet_id=wallet.id,
-                tenant_id=invoice.tenant_id,
-                branch_id=invoice.branch_id,
-                transaction_type=WalletTxType.INVOICE_DEBIT,
-                amount=payload.amount,
-                payment_mode="wallet",
-                reference_invoice_id=invoice.id,
-                notes=f"Deducted for Invoice #{invoice.invoice_number}" + (f" | {payload.notes}" if payload.notes else ""),
-                created_by=invoice.created_by,
-            )
-            self.db.add(w_tx)
-            await self.db.flush()
-            await self.db.refresh(wallet)
+                if "wallet" in sp.payment_method.lower():
+                    wallet_res = await self.db.execute(select(PatientWallet).where(PatientWallet.patient_id == invoice.patient_id))
+                    wallet = wallet_res.scalar_one_or_none()
+                    if not wallet or wallet.balance < sp_amt:
+                        avail = wallet.balance if wallet else Decimal("0")
+                        raise InsufficientWalletBalanceError(f"Insufficient patient advance wallet balance (Available: ₹{avail})")
+                    wallet.balance -= sp_amt
+                    invoice.wallet_amount_used = (invoice.wallet_amount_used or Decimal("0")) + sp_amt
+                    w_tx = WalletTransaction(
+                        wallet_id=wallet.id,
+                        tenant_id=invoice.tenant_id,
+                        branch_id=invoice.branch_id,
+                        transaction_type=WalletTxType.INVOICE_DEBIT,
+                        amount=sp_amt,
+                        payment_mode="wallet",
+                        reference_invoice_id=invoice.id,
+                        notes=f"Deducted for Invoice #{invoice.invoice_number}" + (f" | {payload.notes}" if payload.notes else ""),
+                        created_by=invoice.created_by,
+                    )
+                    self.db.add(w_tx)
+                    await self.db.flush()
+                    await self.db.refresh(wallet)
 
-        invoice.paid_amount += payload.amount
+                m_str = sp.payment_method
+                if sp.upi_pay_mode:
+                    m_str += f" ({sp.upi_pay_mode})"
+                if sp.reference:
+                    m_str += f" [Ref: {sp.reference}]"
+                split_entries.append(f"{m_str}: ₹{sp_amt}")
+
+            invoice.payment_method = "split"
+        else:
+            total_payment_added = payload.amount
+            is_wallet = payload.payment_method and "wallet" in payload.payment_method.lower()
+            if is_wallet and payload.amount > Decimal("0"):
+                wallet_res = await self.db.execute(select(PatientWallet).where(PatientWallet.patient_id == invoice.patient_id))
+                wallet = wallet_res.scalar_one_or_none()
+                if not wallet or wallet.balance < payload.amount:
+                    avail = wallet.balance if wallet else Decimal("0")
+                    raise InsufficientWalletBalanceError(f"Insufficient patient advance wallet balance (Available: ₹{avail})")
+
+                wallet.balance -= payload.amount
+                invoice.wallet_amount_used = (invoice.wallet_amount_used or Decimal("0")) + payload.amount
+
+                w_tx = WalletTransaction(
+                    wallet_id=wallet.id,
+                    tenant_id=invoice.tenant_id,
+                    branch_id=invoice.branch_id,
+                    transaction_type=WalletTxType.INVOICE_DEBIT,
+                    amount=payload.amount,
+                    payment_mode="wallet",
+                    reference_invoice_id=invoice.id,
+                    notes=f"Deducted for Invoice #{invoice.invoice_number}" + (f" | {payload.notes}" if payload.notes else ""),
+                    created_by=invoice.created_by,
+                )
+                self.db.add(w_tx)
+                await self.db.flush()
+                await self.db.refresh(wallet)
+
+            if payload.payment_method:
+                invoice.payment_method = payload.payment_method
+            if payload.upi_pay_mode:
+                invoice.upi_pay_mode = payload.upi_pay_mode
+
+        invoice.paid_amount += total_payment_added
         if invoice.paid_amount >= invoice.total_amount:
             invoice.status = InvoiceStatus.PAID
         elif invoice.paid_amount > Decimal("0"):
             invoice.status = InvoiceStatus.PARTIALLY_PAID
 
-        if payload.payment_method:
-            invoice.payment_method = payload.payment_method
-        if payload.upi_pay_mode:
-            invoice.upi_pay_mode = payload.upi_pay_mode
-        if payload.notes:
+        audit_note = payload.notes or ""
+        if split_entries:
+            split_txt = f"Payment Tenders: {', '.join(split_entries)}"
+            audit_note = f"{audit_note} | {split_txt}" if audit_note else split_txt
+
+        if audit_note:
             existing_notes = f"{invoice.notes} | " if invoice.notes else ""
-            invoice.notes = f"{existing_notes}{payload.notes}"
+            invoice.notes = f"{existing_notes}{audit_note}"
+
+        tx_entries = list(invoice.payment_transactions or [])
+        if is_split:
+            for sp in payload.split_payments:
+                sp_amt = Decimal(str(sp.amount or 0))
+                if sp_amt > Decimal("0"):
+                    tx_entries.append({
+                        "id": str(uuid.uuid4()),
+                        "type": "payment",
+                        "amount": float(sp_amt),
+                        "payment_method": sp.payment_method,
+                        "upi_pay_mode": sp.upi_pay_mode,
+                        "reference": sp.reference,
+                        "notes": sp.notes or (payload.notes or "Subsequent payment"),
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+        elif total_payment_added > Decimal("0"):
+            tx_entries.append({
+                "id": str(uuid.uuid4()),
+                "type": "payment",
+                "amount": float(total_payment_added),
+                "payment_method": payload.payment_method or "cash",
+                "upi_pay_mode": payload.upi_pay_mode,
+                "notes": payload.notes or "Subsequent payment",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+        invoice.payment_transactions = tx_entries
+        flag_modified(invoice, "payment_transactions")
 
         await self.db.flush()
+        await self.db.commit()
+        await self.db.refresh(invoice)
+        patient = await self.db.get(Patient, invoice.patient_id)
+        return self._build_invoice_response(invoice, patient)
+
+    async def cancel_invoice(self, invoice_id: UUID, reason: str, cancelled_by: Optional[UUID] = None) -> InvoiceResponse:
+        invoice = await self.db.get(Invoice, invoice_id)
+        if not invoice:
+            raise InvoiceNotFoundError("Invoice not found")
+        if invoice.status == InvoiceStatus.CANCELLED:
+            raise ValueError("Invoice is already cancelled")
+
+        invoice.status = InvoiceStatus.CANCELLED
+        cancel_note = f"CANCELLED: {reason}"
+        invoice.notes = f"{invoice.notes} | {cancel_note}" if invoice.notes else cancel_note
+
+        txs = list(invoice.payment_transactions or [])
+        txs.append({
+            "id": str(uuid.uuid4()),
+            "type": "cancellation",
+            "reason": reason,
+            "timestamp": datetime.utcnow().isoformat(),
+            "cancelled_by": str(cancelled_by) if cancelled_by else None,
+        })
+        invoice.payment_transactions = txs
+        flag_modified(invoice, "payment_transactions")
+
+        await self.db.commit()
+        await self.db.refresh(invoice)
+        patient = await self.db.get(Patient, invoice.patient_id)
+        return self._build_invoice_response(invoice, patient)
+
+    async def refund_invoice(
+        self,
+        invoice_id: UUID,
+        amount: Decimal,
+        reason: str,
+        refund_to_wallet: bool = True,
+        payment_method: str = "wallet",
+        notes: Optional[str] = None,
+        tenant_id: Optional[UUID] = None,
+    ) -> InvoiceResponse:
+        invoice = await self.db.get(Invoice, invoice_id)
+        if not invoice:
+            raise InvoiceNotFoundError("Invoice not found")
+        if amount <= Decimal("0"):
+            raise ValueError("Refund amount must be greater than zero")
+        if amount > invoice.paid_amount:
+            raise ValueError(f"Refund amount (₹{amount}) cannot exceed amount paid (₹{invoice.paid_amount})")
+
+        invoice.paid_amount -= amount
+        if invoice.paid_amount <= Decimal("0"):
+            invoice.status = InvoiceStatus.REFUNDED
+        else:
+            invoice.status = InvoiceStatus.PARTIALLY_PAID
+
+        if refund_to_wallet:
+            wallet_res = await self.db.execute(select(PatientWallet).where(PatientWallet.patient_id == invoice.patient_id))
+            wallet = wallet_res.scalar_one_or_none()
+            if not wallet:
+                wallet = PatientWallet(
+                    patient_id=invoice.patient_id,
+                    tenant_id=invoice.tenant_id,
+                    branch_id=invoice.branch_id,
+                    balance=Decimal("0.00"),
+                )
+                self.db.add(wallet)
+                await self.db.flush()
+
+            wallet.balance += amount
+            w_tx = WalletTransaction(
+                wallet_id=wallet.id,
+                tenant_id=invoice.tenant_id,
+                branch_id=invoice.branch_id,
+                transaction_type=WalletTxType.CREDIT,
+                amount=amount,
+                payment_mode=payment_method or "wallet_refund",
+                reference_invoice_id=invoice.id,
+                notes=f"Refund from Invoice #{invoice.invoice_number}: {reason}",
+                created_by=invoice.created_by,
+            )
+            self.db.add(w_tx)
+            await self.db.flush()
+
+        txs = list(invoice.payment_transactions or [])
+        txs.append({
+            "id": str(uuid.uuid4()),
+            "type": "refund",
+            "amount": float(amount),
+            "refund_to_wallet": refund_to_wallet,
+            "payment_method": payment_method,
+            "reason": reason,
+            "notes": notes,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        invoice.payment_transactions = txs
+        flag_modified(invoice, "payment_transactions")
+
+        refund_note = f"Refunded ₹{amount} ({'Credited to Wallet' if refund_to_wallet else payment_method}): {reason}"
+        invoice.notes = f"{invoice.notes} | {refund_note}" if invoice.notes else refund_note
+
+        await self.db.commit()
         await self.db.refresh(invoice)
         patient = await self.db.get(Patient, invoice.patient_id)
         return self._build_invoice_response(invoice, patient)
@@ -492,11 +841,16 @@ class BillingService:
     async def get_patient_packages(
         self, patient_id: UUID, tenant_id: UUID
     ) -> list[PatientPackageResponse]:
+        patient_ids = [patient_id]
+        patient = await self.db.get(Patient, patient_id)
+        if patient and patient.partner_id:
+            patient_ids.append(patient.partner_id)
+
         query = (
             select(PatientPackage)
             .options(selectinload(PatientPackage.patient))
             .where(
-                PatientPackage.patient_id == patient_id,
+                PatientPackage.patient_id.in_(patient_ids),
                 PatientPackage.tenant_id == tenant_id,
             )
             .order_by(desc(PatientPackage.created_at))

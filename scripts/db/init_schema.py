@@ -109,10 +109,18 @@ async def run_init_schema(
                 "ALTER TABLE patients ADD COLUMN IF NOT EXISTS referring_doctor VARCHAR(255);",
                 "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);",
                 "ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);",
+                # Unified Billing schema extensions
+                "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source_module VARCHAR(100) DEFAULT 'opd';",
+                "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source_reference_id UUID;",
+                "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_transactions JSONB DEFAULT '[]'::jsonb;",
+                "ALTER TABLE ipd_admissions ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id);",
+                "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id);",
+                "ALTER TABLE clinical_records ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id);",
             ]
             for stmt in column_migrations:
                 try:
-                    await conn.execute(text(stmt))
+                    async with conn.begin_nested():
+                        await conn.execute(text(stmt))
                 except Exception as col_err:
                     print(f"  ⚠️ Migration notice for '{stmt}': {col_err}")
 
