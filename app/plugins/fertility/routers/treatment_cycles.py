@@ -202,6 +202,7 @@ def serialize_treatment_cycle(
     partner: Optional[Patient] = None,
     creator: Optional[User] = None,
     doctor: Optional[User] = None,
+    protocol: Optional[ProtocolTemplate] = None,
 ) -> dict:
     creator_name = None
     if creator:
@@ -214,6 +215,12 @@ def serialize_treatment_cycle(
         doc_name = doctor.name
     elif getattr(cycle, "doctor", None):
         doc_name = cycle.doctor.name
+
+    proto_name = None
+    if protocol:
+        proto_name = protocol.name
+    elif getattr(cycle, "protocol_template", None):
+        proto_name = cycle.protocol_template.name
 
     return {
         "id": str(cycle.id),
@@ -234,6 +241,7 @@ def serialize_treatment_cycle(
         "male_factors": cycle.male_factors or [],
         "treatment_at_other_centre": cycle.treatment_at_other_centre,
         "protocol_template_id": str(cycle.protocol_template_id) if cycle.protocol_template_id else None,
+        "protocol_name": proto_name,
         "sentinel_dates": cycle.sentinel_dates or {},
         "gametes_source": cycle.gametes_source or {},
         "pgs_pgd_data": cycle.pgs_pgd_data or {},
@@ -329,7 +337,7 @@ async def create_treatment_cycle(
         gen_cal = generate_medication_calendar(
             rules=rules_data,
             sentinel_dates=payload.sentinel_dates or {},
-            total_days=21,
+            total_days=None,
             treatment_type=payload.treatment_type,
             timeline_events=timeline_events,
         )
@@ -417,6 +425,13 @@ async def list_treatment_cycles(
         for u in u_res.scalars().all():
             user_map[u.id] = u
 
+    proto_ids = {c.protocol_template_id for c in cycles if c.protocol_template_id}
+    protocol_map = {}
+    if proto_ids:
+        pr_res = await db.execute(select(ProtocolTemplate).where(ProtocolTemplate.id.in_(list(proto_ids))))
+        for pr in pr_res.scalars().all():
+            protocol_map[pr.id] = pr
+
     return [
         serialize_treatment_cycle(
             c,
@@ -424,6 +439,7 @@ async def list_treatment_cycles(
             patient_map.get(c.partner_id),
             user_map.get(c.created_by),
             user_map.get(c.treating_doctor_id),
+            protocol_map.get(c.protocol_template_id),
         )
         for c in cycles
     ]
@@ -548,7 +564,8 @@ async def get_treatment_cycle(cycle_id: UUID, db: AsyncSession = Depends(get_db)
     partner = await db.get(Patient, cycle.partner_id) if cycle.partner_id else None
     creator = await db.get(User, cycle.created_by) if cycle.created_by else None
     doctor = await db.get(User, cycle.treating_doctor_id) if cycle.treating_doctor_id else None
-    return serialize_treatment_cycle(cycle, patient, partner, creator, doctor)
+    protocol = await db.get(ProtocolTemplate, cycle.protocol_template_id) if cycle.protocol_template_id else None
+    return serialize_treatment_cycle(cycle, patient, partner, creator, doctor, protocol)
 
 
 @router.patch("/{cycle_id}/status")
@@ -816,7 +833,7 @@ async def get_cycle_medication_calendar(cycle_id: UUID, db: AsyncSession = Depen
     calendar = generate_medication_calendar(
         rules=rules_data,
         sentinel_dates=cycle.sentinel_dates or {},
-        total_days=21,
+        total_days=None,
         treatment_type=cycle.treatment_type,
         timeline_events=timeline_events,
     )

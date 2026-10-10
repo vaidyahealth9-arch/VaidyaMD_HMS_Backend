@@ -22,6 +22,7 @@ class ClinicalRecord(Base):
     record_type = Column(String(100), nullable=False, comment="E.g. 'female_history', 'male_history', 'opd_consultation'")
     schema_version = Column(String(10), default="1.0", comment="Version of the JSON schema used")
     data = Column(JSONB, nullable=False, comment="The actual clinical data as JSONB — NOT hardcoded columns")
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True)
 
     # Audit
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)

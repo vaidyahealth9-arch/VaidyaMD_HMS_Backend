@@ -57,6 +57,7 @@ class IPDAdmission(Base):
     status = Column(String(50), default="Active")
     total_accrued_amount = Column(Float, default=0.0)
     last_accrual_date = Column(DateTime, nullable=True)
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True)
     notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)

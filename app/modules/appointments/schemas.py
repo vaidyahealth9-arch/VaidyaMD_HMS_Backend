@@ -12,6 +12,10 @@ class AppointmentCreate(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
     consultation_fee: Optional[float] = None
+    paid_amount: Optional[float] = None
+    payment_method: Optional[str] = None
+    upi_pay_mode: Optional[str] = None
+    discount: Optional[float] = None
     metadata: Optional[dict] = None
     branch_id: Optional[UUID] = None
 
@@ -39,6 +43,12 @@ class AppointmentResponse(BaseModel):
     status: str
     visit_type: str
     notes: Optional[str] = None
+    invoice_id: Optional[str] = None
+    invoice_number: Optional[str] = None
+    invoice_status: Optional[str] = None
+    invoice_total: Optional[float] = None
+    invoice_paid: Optional[float] = None
+    invoice_pending_due: Optional[float] = None
     metadata_: dict = {}
     tenant_id: UUID
     branch_id: Optional[UUID] = None

@@ -263,6 +263,45 @@ class IPDService:
         await self.db.refresh(admission)
         return {"message": "Patient successfully admitted to IPD", "admission_id": str(admission.id), "admission_number": adm_num}
 
+    async def calculate_discharge_summary(self, admission_id: UUID):
+        admission = await self.db.get(IPDAdmission, admission_id)
+        if not admission:
+            raise ValueError("Admission not found")
+        patient = await self.db.get(Patient, admission.patient_id)
+        bed = await self.db.get(Bed, admission.bed_id) if admission.bed_id else None
+        ward = await self.db.get(Ward, bed.ward_id) if bed and bed.ward_id else None
+
+        adm_date = admission.admission_date or datetime.utcnow()
+        now = datetime.utcnow()
+        duration_days = max(1, (now.date() - adm_date.date()).days or 1)
+
+        daily_rate = float(bed.daily_rate) if bed and bed.daily_rate else 0.0
+        room_charge = round(daily_rate * duration_days, 2)
+
+        items = [
+            {
+                "description": f"IPD Room Charges: {ward.name if ward else 'Ward'} - Bed {bed.bed_number if bed else 'Standard'} ({duration_days} day{'s' if duration_days > 1 else ''})",
+                "quantity": duration_days,
+                "unit_price": daily_rate,
+                "total": room_charge,
+                "service_code": "IPD-ROOM"
+            }
+        ]
+
+        return {
+            "admission_id": str(admission.id),
+            "patient_id": str(admission.patient_id),
+            "patient_name": patient.name if patient else "Patient",
+            "patient_vid": getattr(patient, "vid", getattr(patient, "mrn", "")),
+            "admission_date": adm_date.isoformat(),
+            "duration_days": duration_days,
+            "bed_number": bed.bed_number if bed else "—",
+            "ward_name": ward.name if ward else "—",
+            "daily_rate": daily_rate,
+            "suggested_items": items,
+            "estimated_subtotal": room_charge,
+        }
+
     async def discharge_patient(self, admission_id: UUID, payload: DischargeRequest):
         admission = await self.db.get(IPDAdmission, admission_id)
         if not admission:
@@ -270,6 +309,8 @@ class IPDService:
 
         admission.status = "Discharged"
         admission.discharge_date = datetime.utcnow()
+        if getattr(payload, "invoice_id", None):
+            admission.invoice_id = payload.invoice_id
         if payload.notes:
             admission.notes = f"{admission.notes or ''}\nDischarge note: {payload.notes}"
 

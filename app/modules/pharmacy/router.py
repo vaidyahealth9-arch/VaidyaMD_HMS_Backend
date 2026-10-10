@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, UploadFile, File, Form, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from typing import Optional
@@ -247,4 +247,120 @@ async def delete_vendor(
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Tenant context required to delete vendor")
     return await service.delete_vendor(vendor_id, tenant_id=current_user.tenant_id)
+
+
+# =====================================================================
+# Dedicated Pharmacy CSV Batch Stock Ingestion Endpoints
+# =====================================================================
+
+@router.get("/inventory/template-csv")
+@router.get("/inventory/template-csv/", include_in_schema=False)
+async def download_pharmacy_stock_template():
+    """Download standard RFC 4180 CSV template for bulk pharmacy formulary and batch upload."""
+    from app.core.onboarding.engine import get_blank_template_csv
+    csv_data = get_blank_template_csv("pharmacy_stock")
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": 'attachment; filename="11b_pharmacy_stock_template.csv"',
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+@router.post("/inventory/preview-csv")
+@router.post("/inventory/preview-csv/", include_in_schema=False)
+async def preview_pharmacy_stock_csv(
+    file: UploadFile = File(...),
+    conflict_mode: str = Form("overwrite"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Preview pharmacy stock CSV rows, identifying new insertions vs batch updates."""
+    from app.core.onboarding.engine import preview_domain_csv
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required to preview stock CSV")
+    try:
+        raw_bytes = await file.read()
+        csv_content = raw_bytes.decode("utf-8-sig")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Unable to read CSV file: {str(e)}")
+
+    try:
+        stats = await preview_domain_csv(
+            session=db,
+            hospital_id=current_user.tenant_id,
+            domain="pharmacy_stock",
+            csv_content=csv_content,
+            conflict_mode=conflict_mode,
+        )
+        return {
+            "status": "preview",
+            "domain": "pharmacy_stock",
+            "filename": file.filename,
+            "conflict_mode": conflict_mode,
+            "stats": stats,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Preview failed: {str(e)}")
+
+
+@router.post("/inventory/import-csv")
+@router.post("/inventory/import-csv/", include_in_schema=False)
+async def import_pharmacy_stock_csv(
+    file: UploadFile = File(...),
+    conflict_mode: str = Form("overwrite"),
+    dry_run: bool = Form(False),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk ingest pharmacy inventory batches from CSV into live database."""
+    from app.core.onboarding.engine import import_domain_csv, preview_domain_csv
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required to import stock CSV")
+    try:
+        raw_bytes = await file.read()
+        csv_content = raw_bytes.decode("utf-8-sig")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Unable to read CSV file: {str(e)}")
+
+    if dry_run:
+        try:
+            stats = await preview_domain_csv(
+                session=db,
+                hospital_id=current_user.tenant_id,
+                domain="pharmacy_stock",
+                csv_content=csv_content,
+                conflict_mode=conflict_mode,
+            )
+            return {"status": "preview", "stats": stats}
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=f"Preview failed: {str(e)}")
+
+    try:
+        stats = await import_domain_csv(
+            session=db,
+            hospital_id=current_user.tenant_id,
+            domain="pharmacy_stock",
+            csv_content=csv_content,
+            conflict_mode=conflict_mode,
+        )
+        if isinstance(stats, dict) and stats.get("success") is False:
+            raise HTTPException(status_code=400, detail=stats.get("error", "CSV ingestion failed"))
+        await db.commit()
+        return {
+            "status": "success",
+            "domain": "pharmacy_stock",
+            "filename": file.filename,
+            "conflict_mode": conflict_mode,
+            "stats": stats,
+        }
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=f"Stock CSV Import failed: {str(e)}")
+
 

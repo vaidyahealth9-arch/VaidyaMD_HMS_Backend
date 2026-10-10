@@ -43,6 +43,7 @@ class AdmissionCreate(BaseModel):
 
 class DischargeRequest(BaseModel):
     notes: Optional[str] = None
+    invoice_id: Optional[UUID] = None
 
 class TransferBedRequest(BaseModel):
     target_bed_id: UUID

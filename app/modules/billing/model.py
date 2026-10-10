@@ -21,10 +21,13 @@ class Invoice(Base):
     invoice_number = Column(String(50), unique=True, nullable=False, comment="Auto-generated: VMD-INV-XXXXX")
     patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False)
     appointment_source = Column(String(100), default="OP")
+    source_module = Column(String(100), default="opd", comment="opd, ipd, pharmacy, lims, fertility, cosgyn, general")
+    source_reference_id = Column(UUID(as_uuid=True), nullable=True, comment="Ref ID e.g. admission_id, appointment_id, indent_id")
     reason_for_attendance = Column(Text, nullable=True)
     selected_embryologist_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
     items = Column(JSONB, nullable=False)
+    payment_transactions = Column(JSONB, default=list, nullable=False, comment="List of payment transaction receipts")
     subtotal = Column(Numeric(12, 2), nullable=False)
     discount = Column(Numeric(12, 2), default=0)
     tax = Column(Numeric(12, 2), default=0)

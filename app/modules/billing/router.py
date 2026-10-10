@@ -10,6 +10,8 @@ from app.modules.billing.schemas import (
     InvoiceCreate,
     InvoiceResponse,
     PaymentRequest,
+    InvoiceCancelRequest,
+    InvoiceRefundRequest,
     TreatmentPackageSchema,
     TreatmentPackageUpdate,
     ServiceItemCreate,
@@ -164,6 +166,42 @@ async def add_invoice_payment(
     except InvoiceNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except InsufficientWalletBalanceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/invoices/{invoice_id}/cancel", response_model=InvoiceResponse)
+async def cancel_invoice(
+    invoice_id: UUID,
+    payload: InvoiceCancelRequest,
+    current_user: User = Depends(get_current_user),
+    service: BillingService = Depends(get_billing_service),
+):
+    try:
+        return await service.cancel_invoice(invoice_id, payload.reason, payload.cancelled_by or current_user.id)
+    except InvoiceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/invoices/{invoice_id}/refund", response_model=InvoiceResponse)
+async def refund_invoice(
+    invoice_id: UUID,
+    payload: InvoiceRefundRequest,
+    current_user: User = Depends(get_current_user),
+    service: BillingService = Depends(get_billing_service),
+):
+    try:
+        return await service.refund_invoice(
+            invoice_id=invoice_id,
+            amount=payload.amount,
+            reason=payload.reason,
+            refund_to_wallet=payload.refund_to_wallet,
+            payment_method=payload.payment_method or "wallet",
+            notes=payload.notes,
+            tenant_id=current_user.tenant_id,
+        )
+    except InvoiceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/packages", response_model=list[TreatmentPackageSchema])

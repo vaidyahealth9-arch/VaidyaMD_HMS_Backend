@@ -25,6 +25,7 @@ class Appointment(Base):
     status = Column(Enum(AppointmentStatus), default=AppointmentStatus.SCHEDULED, nullable=False)
     visit_type = Column(String(50), default="consultation", comment="consultation, follow_up, procedure")
     notes = Column(Text)
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True)
     metadata_ = Column("metadata", JSONB, default=dict, comment="Extra metadata like OT booking info")
 
     # Tenant & Branch FK
@@ -37,3 +38,4 @@ class Appointment(Base):
     # Relationships
     patient = relationship("Patient", back_populates="appointments")
     doctor = relationship("User", foreign_keys=[doctor_id])
+    invoice = relationship("Invoice", foreign_keys=[invoice_id], lazy="selectin")

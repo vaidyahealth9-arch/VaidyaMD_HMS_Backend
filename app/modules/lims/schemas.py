@@ -13,6 +13,9 @@ class ManualLabReportCreate(BaseModel):
     pathologist_notes: Optional[str] = None
     status: str = "Pending Authorization"
     branch_id: Optional[UUID] = None
+    price: Optional[float] = None
+    bill_immediately: bool = False
+    invoice_id: Optional[UUID] = None
 
 class ReportAuthorizeRequest(BaseModel):
     pathologist_id: Optional[UUID] = None

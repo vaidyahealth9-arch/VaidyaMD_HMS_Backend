@@ -52,16 +52,55 @@ class LIMSService:
             schema_version="1.0",
             data=record_data,
             created_by=current_user.id,
+            invoice_id=payload.invoice_id,
         )
         self.db.add(record)
         await self.db.flush()
         await self.db.refresh(record)
+
+        generated_invoice = None
+        if not payload.invoice_id and payload.bill_immediately and payload.price and payload.price > 0:
+            try:
+                from app.modules.billing.service import BillingService
+                from app.modules.billing.schemas import InvoiceCreate, InvoiceItem
+                from decimal import Decimal
+                bill_svc = BillingService(self.db)
+                inv_create = InvoiceCreate(
+                    patient_id=payload.patient_id,
+                    source_module="lims",
+                    appointment_source="LAB",
+                    source_reference_id=record.id,
+                    reason_for_attendance=f"Lab Diagnostic: {payload.test_name}",
+                    items=[
+                        InvoiceItem(
+                            description=f"Lab Test: {payload.test_name}",
+                            quantity=1,
+                            unit_price=Decimal(str(payload.price)),
+                            total=Decimal(str(payload.price)),
+                            service_code="LAB",
+                            category="Lab",
+                        )
+                    ],
+                    created_by=current_user.id,
+                    branch_id=branch_id,
+                )
+                inv_res = await bill_svc.create_invoice(inv_create, tenant_id=tenant_id)
+                record.invoice_id = inv_res.id
+                await self.db.flush()
+                generated_invoice = {
+                    "id": str(inv_res.id),
+                    "invoice_number": inv_res.invoice_number,
+                    "total_amount": float(inv_res.total_amount),
+                }
+            except Exception:
+                pass
 
         return {
             "status": "success",
             "record_id": str(record.id),
             "sample_id": sample_id,
             "test_name": payload.test_name,
+            "invoice": generated_invoice,
             "message": f"Manual lab report for '{payload.test_name}' queued into LIMS worklist.",
         }
 
@@ -102,6 +141,7 @@ class LIMSService:
                 "pathologist_notes": r.data.get("pathologist_notes"),
                 "authorized_by": r.data.get("authorized_by"),
                 "authorized_at": r.data.get("authorized_at"),
+                "invoice_id": str(r.invoice_id) if getattr(r, "invoice_id", None) else None,
                 "created_at": r.created_at.isoformat(),
             })
         return worklist
