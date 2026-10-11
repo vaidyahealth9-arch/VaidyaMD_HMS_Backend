@@ -64,3 +64,11 @@ class User(Base):
         foreign_keys="Notification.recipient_id",
         lazy="selectin",
     )
+
+    @property
+    def hospital_id(self):
+        return self.tenant_id
+
+    @property
+    def full_name(self):
+        return self.name

@@ -6,7 +6,7 @@ from uuid import UUID
 from typing import Optional, List, Dict, Any
 
 from fastapi import HTTPException
-from app.core.models import Patient, Invoice, Hospital
+from app.core.models import Patient, Invoice, Hospital, User
 from app.modules.billing.model import InvoiceStatus
 from app.modules.pharmacy.model import (
     PharmacyIndent,
@@ -67,6 +67,9 @@ class PharmacyService:
                 branch_code = b.code
 
         creator_id = (current_user.id if current_user else None) or payload.doctor_id or patient.treating_doctor_id
+        if not creator_id:
+            u_res = await self.db.execute(select(User.id).where(User.tenant_id == tenant_id, User.is_active == True).limit(1))
+            creator_id = u_res.scalar_one_or_none()
 
         dispensed_items_audit = []
         total_bill = 0.0
@@ -114,8 +117,13 @@ class PharmacyService:
                 deduct_qty = min(batch.quantity_available, qty_needed)
                 batch.quantity_available -= deduct_qty
                 qty_needed -= deduct_qty
-                item_price = batch.selling_price if (batch.selling_price and batch.selling_price > 0) else (batch.mrp if (batch.mrp and batch.mrp > 0) else (batch.purchase_rate or 0.0))
-                item_cost = deduct_qty * item_price
+                
+                pack_sz = max(1, getattr(batch, "pack_size", 1) or 1)
+                sheet_price = batch.selling_price if (batch.selling_price and batch.selling_price > 0) else (batch.mrp if (batch.mrp and batch.mrp > 0) else (batch.purchase_rate or 0.0))
+                # Real-time per-tablet unit price
+                item_unit_price = round(sheet_price / pack_sz, 4)
+                # Compute total cost proportionally to avoid rounding loss
+                item_cost = round(deduct_qty * (sheet_price / pack_sz), 2)
                 total_bill += item_cost
 
                 dispensed_items_audit.append({
@@ -124,7 +132,8 @@ class PharmacyService:
                     "batch_number": batch.batch_number,
                     "expiry_date": batch.expiry_date.isoformat(),
                     "quantity_dispensed": deduct_qty,
-                    "unit_price": item_price,
+                    "pack_size": pack_sz,
+                    "unit_price": round(sheet_price / pack_sz, 2),
                     "total_price": item_cost,
                     "rack_location": batch.rack_location,
                 })
@@ -412,6 +421,10 @@ class PharmacyService:
                 except Exception:
                     pass
 
+            pack_sz = max(1, int(item.get("pack_size", 10) or 10))
+            raw_qty = int(item.get("quantity", 10) or 10)
+            loose_qty = raw_qty * pack_sz if item.get("is_sheet_qty") else raw_qty
+
             batch = InventoryBatch(
                 tenant_id=grn.tenant_id,
                 branch_id=grn.branch_id,
@@ -421,8 +434,9 @@ class PharmacyService:
                 category=item.get("category", "General Pharmacy"),
                 batch_number=item.get("batch_number", f"B{uuid.uuid4().hex[:6].upper()}"),
                 expiry_date=exp_date,
-                quantity_received=item.get("quantity", 10),
-                quantity_available=item.get("quantity", 10),
+                pack_size=pack_sz,
+                quantity_received=loose_qty,
+                quantity_available=loose_qty,
                 purchase_rate=item.get("purchase_rate", 100.0),
                 mrp=item.get("mrp", 150.0),
                 selling_price=item.get("selling_price", item.get("mrp", 150.0)),
@@ -554,6 +568,19 @@ class PharmacyService:
             except Exception:
                 pass
 
+        pack_size = max(1, int(data.get("pack_size", 1) or 1))
+        if "sheets_received" in data and data.get("sheets_received") is not None:
+            qty_received = int(data["sheets_received"]) * pack_size
+        else:
+            qty_received = int(data.get("quantity_received", data.get("quantity_available", 0)) or 0)
+
+        if "sheets_available" in data and data.get("sheets_available") is not None:
+            qty_available = int(data["sheets_available"]) * pack_size
+        elif "sheets_received" in data and "quantity_available" not in data:
+            qty_available = qty_received
+        else:
+            qty_available = int(data.get("quantity_available", qty_received) or 0)
+
         batch = InventoryBatch(
             tenant_id=tenant_id,
             branch_id=target_branch_id,
@@ -563,8 +590,9 @@ class PharmacyService:
             category=str(data.get("category") or "General Pharmacy").strip(),
             batch_number=str(data.get("batch_number") or f"B{uuid.uuid4().hex[:6].upper()}").strip(),
             expiry_date=exp_date,
-            quantity_received=int(data.get("quantity_received", data.get("quantity_available", 0)) or 0),
-            quantity_available=int(data.get("quantity_available", 0) or 0),
+            pack_size=pack_size,
+            quantity_received=qty_received,
+            quantity_available=qty_available,
             purchase_rate=float(data.get("purchase_rate", 0.0) or 0.0),
             mrp=float(data.get("mrp", 0.0) or 0.0),
             selling_price=float(data.get("selling_price", data.get("mrp", 0.0)) or 0.0),
@@ -588,6 +616,9 @@ class PharmacyService:
         if "is_active" in data and data["is_active"] is not None:
             batch.is_active = bool(data["is_active"])
 
+        if "pack_size" in data and data["pack_size"] is not None:
+            batch.pack_size = max(1, int(data["pack_size"]))
+
         if "expiry_date" in data and data["expiry_date"]:
             try:
                 batch.expiry_date = date.fromisoformat(str(data["expiry_date"]).split("T")[0])
@@ -596,8 +627,14 @@ class PharmacyService:
 
         if "quantity_available" in data and data["quantity_available"] is not None:
             batch.quantity_available = int(data["quantity_available"])
+        elif "sheets_available" in data and data["sheets_available"] is not None:
+            batch.quantity_available = int(data["sheets_available"]) * (batch.pack_size or 1)
+
         if "quantity_received" in data and data["quantity_received"] is not None:
             batch.quantity_received = int(data["quantity_received"])
+        elif "sheets_received" in data and data["sheets_received"] is not None:
+            batch.quantity_received = int(data["sheets_received"]) * (batch.pack_size or 1)
+
         if "purchase_rate" in data and data["purchase_rate"] is not None:
             batch.purchase_rate = float(data["purchase_rate"])
         if "mrp" in data and data["mrp"] is not None:

@@ -204,23 +204,25 @@ def serialize_treatment_cycle(
     doctor: Optional[User] = None,
     protocol: Optional[ProtocolTemplate] = None,
 ) -> dict:
+    c_dict = cycle.__dict__
+
     creator_name = None
     if creator:
         creator_name = creator.name
-    elif getattr(cycle, "creator", None):
-        creator_name = cycle.creator.name
+    elif "creator" in c_dict and c_dict["creator"]:
+        creator_name = getattr(c_dict["creator"], "name", None)
 
     doc_name = None
     if doctor:
         doc_name = doctor.name
-    elif getattr(cycle, "doctor", None):
-        doc_name = cycle.doctor.name
+    elif "doctor" in c_dict and c_dict["doctor"]:
+        doc_name = getattr(c_dict["doctor"], "name", None)
 
     proto_name = None
     if protocol:
         proto_name = protocol.name
-    elif getattr(cycle, "protocol_template", None):
-        proto_name = cycle.protocol_template.name
+    elif "protocol_template" in c_dict and c_dict["protocol_template"]:
+        proto_name = getattr(c_dict["protocol_template"], "name", None)
 
     return {
         "id": str(cycle.id),
@@ -621,7 +623,8 @@ async def update_sentinel_dates(
     partner = await db.get(Patient, cycle.partner_id) if cycle.partner_id else None
     creator = await db.get(User, cycle.created_by) if cycle.created_by else None
     doctor = await db.get(User, cycle.treating_doctor_id) if cycle.treating_doctor_id else None
-    return serialize_treatment_cycle(cycle, patient, partner, creator, doctor)
+    protocol = await db.get(ProtocolTemplate, cycle.protocol_template_id) if cycle.protocol_template_id else None
+    return serialize_treatment_cycle(cycle, patient, partner, creator, doctor, protocol)
 
 
 class CycleUpdate(BaseModel):
@@ -645,14 +648,15 @@ class CycleUpdate(BaseModel):
 
 
 class ETDischargeUpdate(BaseModel):
-    transfer_type: str = "FET"
-    catheter_type: str = "Cook Sydney"
-    embryos_transferred_count: int = 1
+    transfer_type: Optional[str] = "FET"
+    transfer_date: Optional[str] = None
+    catheter_type: Optional[str] = "Cook Sydney"
+    embryos_transferred_count: Optional[Union[int, str]] = 1
     embryo_stage: Optional[str] = None
     embryo_grades: Optional[list[str]] = None
     ultrasound_guidance: Optional[str] = "Transabdominal"
-    blood_on_catheter: bool = False
-    retained_embryo_checked: bool = True
+    blood_on_catheter: Optional[Union[bool, str]] = False
+    retained_embryo_checked: Optional[bool] = True
     witness_embryologist_id: Optional[str] = None
     witness_embryologist_name: Optional[str] = None
     attending_doctor_name: Optional[str] = None
@@ -660,6 +664,9 @@ class ETDischargeUpdate(BaseModel):
     beta_hcg_due_date: Optional[str] = None
     discharge_notes: Optional[str] = None
     precautions: Optional[list[str]] = None
+
+    class Config:
+        extra = "allow"
 
 
 class MedicationAddRequest(BaseModel):
@@ -740,7 +747,8 @@ async def update_treatment_cycle(
     partner = await db.get(Patient, cycle.partner_id) if cycle.partner_id else None
     creator = await db.get(User, cycle.created_by) if cycle.created_by else None
     doctor = await db.get(User, cycle.treating_doctor_id) if cycle.treating_doctor_id else None
-    return serialize_treatment_cycle(cycle, patient, partner, creator, doctor)
+    protocol = await db.get(ProtocolTemplate, cycle.protocol_template_id) if cycle.protocol_template_id else None
+    return serialize_treatment_cycle(cycle, patient, partner, creator, doctor, protocol)
 
 
 @router.patch("/{cycle_id}/et-discharge")
@@ -763,18 +771,22 @@ async def update_et_discharge(
     s_dates = dict(cycle.sentinel_dates or {})
     if payload.beta_hcg_due_date:
         s_dates["beta_hcg_due"] = payload.beta_hcg_due_date
+    if payload.transfer_date:
+        s_dates["et_date"] = payload.transfer_date
+        s_dates["et"] = payload.transfer_date
     cycle.sentinel_dates = s_dates
     flag_modified(cycle, "sentinel_dates")
 
-    await db.flush()
+    await db.commit()
     await db.refresh(cycle)
     patient = await db.get(Patient, cycle.patient_id) if cycle.patient_id else None
     partner = await db.get(Patient, cycle.partner_id) if cycle.partner_id else None
     creator = await db.get(User, cycle.created_by) if cycle.created_by else None
     doctor = await db.get(User, cycle.treating_doctor_id) if cycle.treating_doctor_id else None
+    protocol = await db.get(ProtocolTemplate, cycle.protocol_template_id) if cycle.protocol_template_id else None
     return {
         "message": "Embryo Transfer discharge summary saved successfully",
-        "cycle": serialize_treatment_cycle(cycle, patient, partner, creator, doctor)
+        "cycle": serialize_treatment_cycle(cycle, patient, partner, creator, doctor, protocol)
     }
 
 

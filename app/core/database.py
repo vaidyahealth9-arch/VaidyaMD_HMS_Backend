@@ -82,6 +82,7 @@ async def init_db():
             "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id);",
             "ALTER TABLE clinical_records ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id);",
             "ALTER TABLE counseling_notes ADD COLUMN IF NOT EXISTS comments TEXT;",
+            "ALTER TABLE inventory_batches ADD COLUMN IF NOT EXISTS pack_size INTEGER DEFAULT 1;",
         ]
 
         for stmt in migrations:
