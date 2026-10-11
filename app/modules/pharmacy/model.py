@@ -86,6 +86,7 @@ class InventoryBatch(Base):
     expiry_date = Column(Date, nullable=False)
     quantity_received = Column(Integer, default=0)
     quantity_available = Column(Integer, default=0)
+    pack_size = Column(Integer, default=1, comment="Units per sheet/strip/pack, 1 for vials/syrups")
     purchase_rate = Column(Float, default=0.0)
     mrp = Column(Float, default=0.0)
     selling_price = Column(Float, default=0.0)

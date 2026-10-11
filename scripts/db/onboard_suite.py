@@ -1156,7 +1156,9 @@ async def run_domain_pharmacy_stock(
 
         expiry_str = s_get(r, "expiry_date")
         expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date() if expiry_str else datetime.utcnow().date()
-        qty = int(s_get(r, "quantity_available") or s_get(r, "quantity_received") or 100)
+        pack_size = int(s_get(r, "pack_size") or 1)
+        raw_qty = int(s_get(r, "quantity_available") or s_get(r, "quantity_received") or 100)
+        qty = raw_qty * pack_size if s_get(r, "is_sheets", "").lower() in ("true", "1", "yes") else raw_qty
         p_rate = float(s_get(r, "purchase_rate") or 0.0)
         mrp = float(s_get(r, "mrp") or 0.0)
         s_price = float(s_get(r, "selling_price") or mrp)
@@ -1168,6 +1170,7 @@ async def run_domain_pharmacy_stock(
                 existing_b.generic_name = s_get(r, "generic_name")
                 existing_b.category = s_get(r, "category")
                 existing_b.expiry_date = expiry
+                existing_b.pack_size = pack_size
                 existing_b.quantity_received = int(s_get(r, "quantity_received") or qty)
                 existing_b.quantity_available = qty
                 existing_b.purchase_rate = p_rate
@@ -1190,6 +1193,7 @@ async def run_domain_pharmacy_stock(
                 category=s_get(r, "category"),
                 batch_number=batch_num,
                 expiry_date=expiry,
+                pack_size=pack_size,
                 quantity_received=int(s_get(r, "quantity_received") or qty),
                 quantity_available=qty,
                 purchase_rate=p_rate,

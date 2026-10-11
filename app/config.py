@@ -7,7 +7,7 @@ import secrets
 import warnings
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Any
 
 
 class Settings(BaseSettings):
@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     APP_NAME: str = "VaidyaMD HMS"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug(cls, v: Any) -> bool:
+        if isinstance(v, str):
+            return v.lower() in ("true", "1", "yes", "debug")
+        return bool(v)
 
     POSTGRES_USER: Optional[str] = None
     POSTGRES_PASSWORD: Optional[str] = None

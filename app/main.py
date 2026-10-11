@@ -52,6 +52,7 @@ from app.core.routers.analytics import router as analytics_router
 from app.core.routers.documents import router as documents_router
 from app.modules.counseling.router import router as counseling_router
 from app.core.routers.admin_hub import router as admin_hub_router
+from app.modules.crm.router import router as crm_router
 
 # Plugin routers
 from app.plugins.fertility.router import router as fertility_router
@@ -199,12 +200,17 @@ for prefix in ["/api/core", "/core"]:
     app.include_router(documents_router, prefix=prefix)
     app.include_router(counseling_router, prefix=prefix)
     app.include_router(admin_hub_router, prefix=prefix)
+    app.include_router(crm_router, prefix=prefix)
 
 # --- Plugin Routers (Mounted under both /api/plugins and /plugins) ---
 for prefix in ["/api/plugins", "/plugins"]:
     app.include_router(fertility_router, prefix=prefix)
     app.include_router(opd_router, prefix=prefix)
     app.include_router(cosgyn_router, prefix=prefix)
+
+# Mount CRM router under direct /api and root as well
+app.include_router(crm_router, prefix="/api")
+app.include_router(crm_router, prefix="")
 
 # --- Uploads Serving (Local Disk Cache + GCS Cloud Fallback) ---
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
