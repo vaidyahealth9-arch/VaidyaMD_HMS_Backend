@@ -782,11 +782,17 @@ async def preview_domain_csv(
                 if vn:
                     existing_set.add(vn.lower().strip())
         elif d_key in ["pharmacy_stock", "pharmacy", "stock"]:
-            st_res = await session.execute(select(InventoryBatch.batch_number, InventoryBatch.item_name).where(InventoryBatch.tenant_id == hospital_id))
-            for bn, iname in st_res.all():
+            st_res = await session.execute(
+                select(InventoryBatch.batch_number, InventoryBatch.item_name, InventoryBatch.item_code)
+                .where(InventoryBatch.tenant_id == hospital_id)
+            )
+            existing_db_code_map = {}
+            for bn, iname, icode in st_res.all():
                 if bn:
                     existing_set.add(bn.lower().strip())
                     name_map[bn.lower().strip()] = iname
+                if icode and iname:
+                    existing_db_code_map[icode.strip().upper()] = iname.strip()
         elif d_key == "patients":
             pt_res = await session.execute(select(Patient.phone, Patient.name).where(Patient.tenant_id == hospital_id))
             for p_phone, p_name in pt_res.all():
@@ -914,6 +920,62 @@ async def preview_domain_csv(
             "raw": dict(r)
         })
 
+    collisions = []
+    # Generalized collision detection across domains to prevent accidental overwrites/corruptions
+    domain_key_fields = {
+        "pharmacy_stock": ("item_code", "item_name", "Medicine"),
+        "pharmacy": ("item_code", "item_name", "Medicine"),
+        "stock": ("item_code", "item_name", "Medicine"),
+        "service_catalog": ("code", "name", "Service"),
+        "services": ("code", "name", "Service"),
+        "lims": ("test_code", "test_name", "Lab Test"),
+        "templates": ("record_type", "title", "Template"),
+        "staff": ("email", "name", "Staff Member"),
+        "cryo": ("tank_code", "tank_name", "Cryo Tank"),
+        "treatment_cycles": ("code", "name", "Treatment Modality"),
+        "packages": ("code", "name", "Billing Package"),
+    }
+
+    if d_key in domain_key_fields:
+        code_attr, name_attr, entity_type = domain_key_fields[d_key]
+        code_entity_map = {}
+        for pr in preview_rows:
+            raw = pr.get("raw", {})
+            icode = (raw.get(code_attr) or raw.get("code") or raw.get("test_code") or raw.get("record_type") or raw.get("email") or "").strip().upper()
+            iname = (raw.get(name_attr) or raw.get("name") or raw.get("title") or raw.get("test_name") or "").strip()
+            if icode and iname:
+                if icode not in code_entity_map:
+                    code_entity_map[icode] = set()
+                code_entity_map[icode].add(iname)
+                if 'name_map' in locals() and icode.lower() in name_map:
+                    db_name = name_map.get(icode.lower())
+                    if db_name and db_name.strip().upper() != iname.upper():
+                        code_entity_map[icode].add(db_name)
+                elif 'existing_db_code_map' in locals() and icode in existing_db_code_map:
+                    db_name = existing_db_code_map.get(icode)
+                    if db_name and db_name.strip().upper() != iname.upper():
+                        code_entity_map[icode].add(db_name)
+
+        colliding_codes = {c: sorted(list(names)) for c, names in code_entity_map.items() if len(names) > 1}
+        for pr in preview_rows:
+            raw = pr.get("raw", {})
+            icode = (raw.get(code_attr) or raw.get("code") or raw.get("test_code") or raw.get("record_type") or raw.get("email") or "").strip().upper()
+            if icode in colliding_codes:
+                pr["has_collision"] = True
+                pr["collision_code"] = icode
+                pr["collision_medicines"] = colliding_codes[icode]
+                pr["collision_entities"] = colliding_codes[icode]
+                pr["details"] = f"Collision: {entity_type} key '{icode}' is shared across conflicting records: {', '.join(colliding_codes[icode])}"
+        if colliding_codes:
+            for c, names in colliding_codes.items():
+                collisions.append({
+                    "item_code": c,
+                    "identifier": c,
+                    "medicines": names,
+                    "entities": names,
+                    "message": f"{entity_type} key '{c}' is shared by {len(names)} different records: {', '.join(names)}"
+                })
+
     return {
         "success": True,
         "domain": d_key,
@@ -925,6 +987,7 @@ async def preview_domain_csv(
         "to_skip": to_skip,
         "skipped": to_skip,
         "preview_rows": preview_rows,
+        "collisions": collisions,
         "errors": []
     }
 
@@ -1039,6 +1102,23 @@ async def import_domain_csv(
 
         elif d_key == "staff":
             default_hash = hash_password("vaidya_md_2026")
+            # Pre-validate: ensure no email is assigned to multiple distinct staff members
+            email_names_map = {}
+            for r in reader:
+                em = s_get(r, "email").strip().lower()
+                nm = s_get(r, "name").strip()
+                if em and nm:
+                    if em not in email_names_map:
+                        email_names_map[em] = set()
+                    email_names_map[em].add(nm)
+            colliding_emails = {e: sorted(list(names)) for e, names in email_names_map.items() if len(names) > 1}
+            if colliding_emails:
+                first_e, first_names = next(iter(colliding_emails.items()))
+                raise ValueError(
+                    f"Staff email collision rejected: Email '{first_e}' is assigned to {len(first_names)} different staff members ({', '.join(first_names)}). "
+                    f"Each staff account must have a unique email address."
+                )
+
             for r in reader:
                 email = s_get(r, "email").lower()
                 name = s_get(r, "name")
@@ -1183,6 +1263,23 @@ async def import_domain_csv(
                             stats["created"] += 1
 
         elif d_key == "treatment_cycles":
+            # Pre-validate: ensure no code is assigned to multiple distinct treatment modalities
+            cycle_codes_map = {}
+            for r in reader:
+                c_code = s_get(r, "code").strip().upper()
+                c_name = s_get(r, "name").strip()
+                if c_code and c_name:
+                    if c_code not in cycle_codes_map:
+                        cycle_codes_map[c_code] = set()
+                    cycle_codes_map[c_code].add(c_name)
+            colliding_cycles = {c: sorted(list(names)) for c, names in cycle_codes_map.items() if len(names) > 1}
+            if colliding_cycles:
+                first_c, first_names = next(iter(colliding_cycles.items()))
+                raise ValueError(
+                    f"Treatment cycle code collision rejected: Code '{first_c}' is assigned to {len(first_names)} different modalities ({', '.join(first_names)}). "
+                    f"Each ART cycle modality must have a unique code."
+                )
+
             for r in reader:
                 name = s_get(r, "name")
                 if not name:
@@ -1215,6 +1312,23 @@ async def import_domain_csv(
                     stats["created"] += 1
 
         elif d_key == "service_catalog":
+            # Pre-validate: ensure no code is assigned to multiple distinct service names
+            service_codes_map = {}
+            for r in reader:
+                s_c = (s_get(r, "code") or s_get(r, "service_code")).strip().upper()
+                s_n = (s_get(r, "name") or s_get(r, "service_name")).strip()
+                if s_c and s_n:
+                    if s_c not in service_codes_map:
+                        service_codes_map[s_c] = set()
+                    service_codes_map[s_c].add(s_n)
+            colliding_services = {c: sorted(list(names)) for c, names in service_codes_map.items() if len(names) > 1}
+            if colliding_services:
+                first_c, first_names = next(iter(colliding_services.items()))
+                raise ValueError(
+                    f"Service code collision rejected: Code '{first_c}' is assigned to {len(first_names)} different services ({', '.join(first_names)}). "
+                    f"Each master service must have a unique code."
+                )
+
             for r in reader:
                 code = s_get(r, "code") or s_get(r, "service_code")
                 name = s_get(r, "name") or s_get(r, "service_name")
@@ -1356,6 +1470,23 @@ async def import_domain_csv(
         elif d_key in ["templates", "lims", "cryo"]:
             u_res = await session.execute(select(User.id).where(User.tenant_id == hospital.id).limit(1))
             author_id = u_res.scalar() or hospital.id
+            # Pre-validate: ensure no record_type / test_code / tank_code is assigned to multiple distinct entities
+            tmpl_codes_map = {}
+            for r in reader:
+                t_k = (s_get(r, "record_type") or s_get(r, "test_code") or s_get(r, "tank_code")).strip().upper()
+                t_n = (s_get(r, "title") or s_get(r, "test_name") or s_get(r, "tank_name") or s_get(r, "name")).strip()
+                if t_k and t_n:
+                    if t_k not in tmpl_codes_map:
+                        tmpl_codes_map[t_k] = set()
+                    tmpl_codes_map[t_k].add(t_n)
+            colliding_tmpls = {k: sorted(list(names)) for k, names in tmpl_codes_map.items() if len(names) > 1}
+            if colliding_tmpls:
+                first_k, first_names = next(iter(colliding_tmpls.items()))
+                entity_label = "Lab test" if d_key == "lims" else "Cryo tank" if d_key == "cryo" else "Clinical template"
+                raise ValueError(
+                    f"{entity_label} key collision rejected: Identifier '{first_k}' is assigned to {len(first_names)} different records ({', '.join(first_names)}). "
+                    f"Each record must have a unique identifier."
+                )
 
             for r in reader:
                 t_title = s_get(r, "title") or s_get(r, "test_name") or s_get(r, "tank_name")
@@ -1432,6 +1563,26 @@ async def import_domain_csv(
                         stats["created"] += 1
 
         elif d_key in ["pharmacy_stock", "pharmacy", "stock"]:
+            # Pre-validate: ensure no item_code is assigned to multiple distinct drug names
+            code_names_map = {}
+            for r in reader:
+                rec_type = s_get(r, "record_type").upper()
+                if rec_type not in ["VENDOR"]:
+                    icode = s_get_multi(r, "item_code", "code", "sku").strip().upper()
+                    iname = s_get_multi(r, "item_name", "medicine_name", "drug_name", "product_name", "name").strip()
+                    if icode and iname:
+                        if icode not in code_names_map:
+                            code_names_map[icode] = set()
+                        code_names_map[icode].add(iname)
+
+            multi_codes = {c: sorted(list(names)) for c, names in code_names_map.items() if len(names) > 1}
+            if multi_codes:
+                first_c, first_names = next(iter(multi_codes.items()))
+                raise ValueError(
+                    f"Item Code collision rejected: Code '{first_c}' is assigned to {len(first_names)} different medicines ({', '.join(first_names)}). "
+                    f"Each medicine formulation must have a unique item_code to ensure accurate FEFO dispensing."
+                )
+
             for r in reader:
                 rec_type = s_get(r, "record_type").upper()
                 if rec_type in ["VENDOR"]:
@@ -1517,6 +1668,9 @@ async def import_domain_csv(
 
                     if existing_b:
                         if conflict_mode == "overwrite":
+                            existing_b.item_code = i_code
+                            existing_b.item_name = i_name
+                            existing_b.expiry_date = exp_date
                             existing_b.quantity_available = qty
                             existing_b.quantity_received = max(existing_b.quantity_received or 0, rec_qty)
                             existing_b.mrp = mrp
@@ -1528,6 +1682,8 @@ async def import_domain_csv(
                                 existing_b.category = category
                             if rack_loc:
                                 existing_b.rack_location = rack_loc
+                            if branch_id and not existing_b.branch_id:
+                                existing_b.branch_id = branch_id
                             stats["updated"] += 1
                         else:
                             stats["skipped"] += 1

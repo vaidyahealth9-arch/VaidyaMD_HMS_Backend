@@ -141,6 +141,7 @@ class CRMAnalyticsResponse(BaseModel):
 # ============================================================================
 
 class HeartbeatPayload(BaseModel):
+    device_id: Optional[str] = None
     device_model: Optional[str] = None
     app_version: Optional[str] = None
     sim_operator: Optional[str] = None
@@ -153,11 +154,13 @@ class TelecallerRosterItem(BaseModel):
     user_id: UUID
     user_name: str
     email: str
+    device_id: Optional[str] = None
     device_model: Optional[str] = None
     app_version: Optional[str] = None
     sim_operator: Optional[str] = None
     battery_level: Optional[int] = None
     is_online: bool
+    is_revoked: bool = False
     current_state: str
     current_lead_name: Optional[str] = None
     current_lead_phone: Optional[str] = None

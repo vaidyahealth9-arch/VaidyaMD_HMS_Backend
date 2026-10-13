@@ -147,6 +147,9 @@ class TelecallerSession(Base):
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True, index=True)
 
+    device_id = Column(String(100), nullable=True, index=True, comment="Hardware Android ID")
+    is_revoked = Column(Boolean, default=False, index=True, comment="Admin remote kill switch")
+
     # Device & App Telemetry
     device_model = Column(String(100), nullable=True, comment="e.g. Samsung Galaxy M34")
     app_version = Column(String(20), nullable=True, comment="e.g. 1.0.0")

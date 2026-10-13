@@ -158,13 +158,32 @@ async def initiate_call(
 ):
     service = CRMService(db)
     b_id = parse_branch_uuid(branch_id)
-    return await service.log_call_start(
+    call_log = await service.log_call_start(
         lead_id=lead_id,
         phone_dialed=phone,
         tenant_id=current_user.hospital_id,
         branch_id=b_id,
         telecaller_id=current_user.id
     )
+
+    # Push auto-dial command to telecaller's mobile phone via WebSocket bridge
+    try:
+        from app.core.websocket import ws_manager
+        await ws_manager.send_to_user(
+            str(current_user.id),
+            {
+                "type": "CRM_DIAL_TRIGGER",
+                "action": "DIAL",
+                "call_id": str(call_log.id),
+                "phone": phone,
+                "lead_id": str(lead_id)
+            }
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger("uvicorn.error").warning(f"Failed to push dial event over WS: {e}")
+
+    return call_log
 
 
 @router.post("/calls/{call_id}/disposition", response_model=CallLogResponse)
@@ -326,7 +345,7 @@ async def telecaller_heartbeat(
 ):
     """
     Called every 30-60s by the Android companion app to report online presence,
-    battery, and call states (idle, on_call, wrap_up).
+    battery, and call states. Returns whether the device is active or has been revoked.
     """
     service = CRMService(db)
     b_id = parse_branch_uuid(branch_id)
@@ -336,7 +355,23 @@ async def telecaller_heartbeat(
         branch_id=b_id,
         payload=payload
     )
-    return {"status": "ok", "is_online": session.is_online}
+    return {
+        "status": "ok",
+        "is_online": session.is_online,
+        "is_revoked": session.is_revoked or False
+    }
+
+
+@router.post("/fleet/devices/{user_id}/revoke")
+async def revoke_telecaller_device(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Admin Kill-Switch: Revokes the telecaller's mobile device access."""
+    service = CRMService(db)
+    session = await service.revoke_device(user_id=user_id, tenant_id=current_user.hospital_id)
+    return {"status": "device_revoked", "user_id": str(user_id), "is_revoked": session.is_revoked}
 
 
 @router.get("/fleet/roster", response_model=List[TelecallerRosterItem])
