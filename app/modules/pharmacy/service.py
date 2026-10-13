@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from uuid import UUID
 from typing import Optional, List, Dict, Any
 
@@ -37,7 +37,7 @@ class PharmacyService:
         if tenant_id:
             query = query.where(InventoryBatch.tenant_id == tenant_id)
         if branch_id:
-            query = query.where(InventoryBatch.branch_id == branch_id)
+            query = query.where(or_(InventoryBatch.branch_id == branch_id, InventoryBatch.branch_id.is_(None)))
         if category:
             query = query.where(InventoryBatch.category == category)
         if active_only:
@@ -86,7 +86,7 @@ class PharmacyService:
                 )
             )
             if branch_id:
-                b_query = b_query.where(InventoryBatch.branch_id == branch_id)
+                b_query = b_query.where(or_(InventoryBatch.branch_id == branch_id, InventoryBatch.branch_id.is_(None)))
             b_query = b_query.order_by(InventoryBatch.expiry_date.asc())
 
             res = await self.db.execute(b_query)
@@ -99,7 +99,7 @@ class PharmacyService:
                     InventoryBatch.item_code == item.item_code,
                 )
                 if branch_id:
-                    inactive_q = inactive_q.where(InventoryBatch.branch_id == branch_id)
+                    inactive_q = inactive_q.where(or_(InventoryBatch.branch_id == branch_id, InventoryBatch.branch_id.is_(None)))
                 res_inact = await self.db.execute(inactive_q)
                 inact_batches = res_inact.scalars().all()
                 if inact_batches and all(not b.is_active for b in inact_batches):

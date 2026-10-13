@@ -462,6 +462,7 @@ class CRMService:
     ) -> TelecallerSession:
         """
         Updates telecaller presence every 30-60 seconds from companion Android app.
+        Enforces remote revocation lock.
         """
         stmt = select(TelecallerSession).where(TelecallerSession.user_id == user_id)
         session = (await self.db.execute(stmt)).scalar_one_or_none()
@@ -472,11 +473,13 @@ class CRMService:
                 tenant_id=tenant_id,
                 branch_id=branch_id,
                 user_id=user_id,
+                device_id=payload.device_id,
                 device_model=payload.device_model,
                 app_version=payload.app_version,
                 sim_operator=payload.sim_operator,
                 battery_level=payload.battery_level,
                 is_online=True,
+                is_revoked=False,
                 current_state=payload.current_state,
                 current_lead_id=payload.current_lead_id,
                 last_heartbeat_at=now,
@@ -485,8 +488,11 @@ class CRMService:
             self.db.add(session)
         else:
             session.last_heartbeat_at = now
-            session.is_online = True
-            session.current_state = payload.current_state
+            if not session.is_revoked:
+                session.is_online = True
+                session.current_state = payload.current_state
+            if payload.device_id:
+                session.device_id = payload.device_id
             if payload.device_model:
                 session.device_model = payload.device_model
             if payload.app_version:
@@ -498,6 +504,19 @@ class CRMService:
             if payload.current_lead_id:
                 session.current_lead_id = payload.current_lead_id
 
+        await self.db.commit()
+        await self.db.refresh(session)
+        return session
+
+    async def revoke_device(self, user_id: UUID, tenant_id: UUID) -> TelecallerSession:
+        """Admin Kill-Switch: De-authorizes the telecaller device."""
+        stmt = select(TelecallerSession).where(and_(TelecallerSession.user_id == user_id, TelecallerSession.tenant_id == tenant_id))
+        session = (await self.db.execute(stmt)).scalar_one_or_none()
+        if not session:
+            raise HTTPException(status_code=404, detail="Telecaller session not found")
+        session.is_revoked = True
+        session.is_online = False
+        session.current_state = "revoked"
         await self.db.commit()
         await self.db.refresh(session)
         return session
@@ -526,9 +545,9 @@ class CRMService:
         roster_items: List[TelecallerRosterItem] = []
 
         for session, user, current_lead in results:
-            # Device considered offline if no heartbeat in last 90 seconds
-            is_active_online = session.is_online and (now - session.last_heartbeat_at < timedelta(seconds=90))
-            display_state = session.current_state if is_active_online else "offline"
+            # Device considered offline if no heartbeat in last 90 seconds or revoked
+            is_active_online = session.is_online and not session.is_revoked and (now - session.last_heartbeat_at < timedelta(seconds=90))
+            display_state = "revoked" if session.is_revoked else (session.current_state if is_active_online else "offline")
 
             # Compute calls today & conversions today for this telecaller
             calls_stmt = select(
@@ -564,11 +583,13 @@ class CRMService:
                     user_id=user.id,
                     user_name=user.full_name or user.email,
                     email=user.email,
+                    device_id=session.device_id,
                     device_model=session.device_model,
                     app_version=session.app_version,
                     sim_operator=session.sim_operator,
                     battery_level=session.battery_level,
                     is_online=is_active_online,
+                    is_revoked=session.is_revoked or False,
                     current_state=display_state,
                     current_lead_name=current_lead.name if current_lead else None,
                     current_lead_phone=current_lead.phone if current_lead else None,
