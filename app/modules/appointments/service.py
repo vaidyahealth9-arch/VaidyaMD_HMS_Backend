@@ -272,6 +272,7 @@ class AppointmentService:
             "vitals": data.vitals,
             "chief_complaint": data.chief_complaint,
             "nurse_notes": data.nurse_notes,
+            "provisional_diagnosis": data.provisional_diagnosis,
             "triaged_by": str(user_id),
             "triaged_at": datetime.utcnow().isoformat(),
         }
