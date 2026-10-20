@@ -1204,3 +1204,757 @@ FERTILITY_CONSULTATION_SCHEMA = {
         },
     ],
 }
+
+# ==============================================================================
+# OBSTETRIC ULTRASOUND PROFORMAS (NT, GROWTH, TIFFA, DOPPLER + BPP)
+# ==============================================================================
+
+NT_SCAN_SCHEMA = {
+    "plugin_id": "fertility",
+    "record_type": "nt_scan",
+    "schema_version": "1.0",
+    "title": "NT Scan / First-Trimester Screening (11+0 - 13+6w)",
+    "description": "Nuchal Translucency, early fetal anatomy, and first-trimester aneuploidy risk assessment.",
+    "sections": [
+        {
+            "id": "exam_details",
+            "title": "Patient & Examination Details",
+            "fields": [
+                {"id": "scan_date", "label": "Scan Date", "type": "date", "required": True},
+                {"id": "referring_clinician", "label": "Referring Clinician", "type": "text", "placeholder": "Dr. ..."},
+                {"id": "obstetric_history", "label": "Obstetric History (G P A L)", "type": "text", "placeholder": "G1 P0 A0 L0"},
+                {"id": "lmp_date", "label": "Last Menstrual Period (LMP)", "type": "date"},
+                {"id": "edd_lmp", "label": "EDD by LMP", "type": "date", "formula": "edd_lmp", "helper_text": "Auto-calculated (LMP + 280 days)"},
+                {"id": "ga_lmp", "label": "GA by LMP", "type": "text", "formula": "ga_lmp", "helper_text": "Auto-calculated from LMP & scan date"},
+                {"id": "edd_prior_scan", "label": "EDD by Previous Dating Scan", "type": "date"},
+                {"id": "ga_prior_scan", "label": "GA by Previous Scan", "type": "text", "placeholder": "e.g. 12w 2d"},
+                {
+                    "id": "fetus_count",
+                    "label": "Number of Fetuses",
+                    "type": "select",
+                    "options": [
+                        {"value": "singleton", "label": "Singleton"},
+                        {"value": "twins", "label": "Twin Pregnancy"},
+                        {"value": "triplets", "label": "Triplet Pregnancy"},
+                        {"value": "higher_order", "label": "Higher Order Multiple"},
+                    ],
+                },
+                {"id": "indication", "label": "Indication for Scan", "type": "text", "placeholder": "First-trimester screening, advanced maternal age, routine dating"},
+            ],
+        },
+        {
+            "id": "viability_pregnancy",
+            "title": "Pregnancy & Viability",
+            "fields": [
+                {
+                    "id": "gestational_sac",
+                    "label": "Gestational Sac",
+                    "type": "select",
+                    "options": [
+                        {"value": "intrauterine_regular", "label": "Intrauterine Regular Sac"},
+                        {"value": "irregular", "label": "Irregular Sac"},
+                        {"value": "low_lying", "label": "Low Lying Sac"},
+                    ],
+                },
+                {
+                    "id": "fetal_cardiac_activity",
+                    "label": "Fetal Cardiac Activity",
+                    "type": "select",
+                    "options": [
+                        {"value": "present_regular", "label": "Present & Regular"},
+                        {"value": "present_irregular", "label": "Present & Irregular"},
+                        {"value": "absent", "label": "Absent / Non-viable"},
+                    ],
+                },
+                {"id": "fetal_heart_rate_bpm", "label": "Fetal Heart Rate", "type": "number", "unit": "bpm", "placeholder": "158", "min": 50, "max": 240},
+                {
+                    "id": "chorionicity",
+                    "label": "Chorionicity / Amnionicity (Multiples)",
+                    "type": "select",
+                    "options": [
+                        {"value": "na", "label": "N/A (Singleton)"},
+                        {"value": "dcdam", "label": "Dichorionic Diamniotic (DCDA)"},
+                        {"value": "mcdam", "label": "Monochorionic Diamniotic (MCDA)"},
+                        {"value": "mcma", "label": "Monochorionic Monoamniotic (MCMA)"},
+                    ],
+                },
+                {
+                    "id": "placental_location",
+                    "label": "Placental Location",
+                    "type": "select",
+                    "options": [
+                        {"value": "anterior", "label": "Anterior"},
+                        {"value": "posterior", "label": "Posterior"},
+                        {"value": "fundal", "label": "Fundal"},
+                        {"value": "right_lateral", "label": "Right Lateral"},
+                        {"value": "left_lateral", "label": "Left Lateral"},
+                        {"value": "low_lying", "label": "Low Lying"},
+                    ],
+                },
+                {
+                    "id": "amniotic_fluid_nt",
+                    "label": "Amniotic Fluid",
+                    "type": "select",
+                    "options": [
+                        {"value": "adequate", "label": "Adequate for Gestational Age"},
+                        {"value": "reduced", "label": "Reduced"},
+                        {"value": "increased", "label": "Increased"},
+                    ],
+                },
+            ],
+        },
+        {
+            "id": "crl_nt_markers",
+            "title": "CRL & First-Trimester Markers",
+            "fields": [
+                {"id": "crl_mm", "label": "Crown-Rump Length (CRL)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "62.5", "helper_text": "Optimal NT screening window: 45 to 84 mm (11+0 to 13+6 weeks)"},
+                {"id": "ga_crl", "label": "Gestational Age by CRL", "type": "text", "placeholder": "e.g. 12w 4d"},
+                {"id": "nt_mm", "label": "Nuchal Translucency (NT)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "1.6", "helper_text": "Normal usually < 2.5 mm; measure inner-to-inner border on neutral fetal position"},
+                {
+                    "id": "nasal_bone",
+                    "label": "Nasal Bone",
+                    "type": "select",
+                    "options": [
+                        {"value": "present", "label": "Present"},
+                        {"value": "absent", "label": "Absent"},
+                        {"value": "hypoplastic", "label": "Hypoplastic"},
+                        {"value": "not_visualized", "label": "Not Adequately Visualized"},
+                        {"value": "not_assessed", "label": "Not Assessed"},
+                    ],
+                },
+                {
+                    "id": "ductus_venosus_flow",
+                    "label": "Ductus Venosus Flow",
+                    "type": "select",
+                    "options": [
+                        {"value": "normal_positive_a_wave", "label": "Normal (Positive A-wave)"},
+                        {"value": "abnormal_reversed_a_wave", "label": "Abnormal (Reversed / Absent A-wave)"},
+                        {"value": "not_assessed", "label": "Not Assessed"},
+                    ],
+                },
+                {
+                    "id": "tricuspid_regurgitation",
+                    "label": "Tricuspid Regurgitation",
+                    "type": "select",
+                    "options": [
+                        {"value": "absent", "label": "Absent (Normal)"},
+                        {"value": "present", "label": "Present (Abnormal)"},
+                        {"value": "not_assessed", "label": "Not Assessed"},
+                    ],
+                },
+                {
+                    "id": "intracranial_translucency",
+                    "label": "Intracranial Translucency (IT)",
+                    "type": "select",
+                    "options": [
+                        {"value": "seen_normal", "label": "Seen / Normal 4th Ventricle"},
+                        {"value": "not_seen_abnormal", "label": "Not Seen / Abnormal"},
+                        {"value": "not_assessed", "label": "Not Assessed"},
+                    ],
+                },
+                {
+                    "id": "early_fetal_anatomy",
+                    "label": "Early Fetal Gross Anatomy",
+                    "type": "select",
+                    "options": [
+                        {"value": "no_obvious_abnormality", "label": "No Gross Abnormality Detected"},
+                        {"value": "abnormality_suspected", "label": "Abnormality Suspected (Details Below)"},
+                        {"value": "limited_acoustic_window", "label": "Technically Limited Examination"},
+                        {"value": "not_assessed", "label": "Not Assessed"},
+                    ],
+                },
+            ],
+        },
+        {
+            "id": "maternal_pelvic",
+            "title": "Maternal & Pelvic Findings",
+            "fields": [
+                {"id": "cervical_length_mm", "label": "Cervical Length", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "38.0"},
+                {"id": "subchorionic_hematoma", "label": "Subchorionic Hematoma", "type": "text", "placeholder": "None seen / Small (dimensions in mm)"},
+                {"id": "uterine_fibroids", "label": "Uterine Fibroids", "type": "text", "placeholder": "Nil / Details of size & location"},
+                {"id": "adnexa", "label": "Bilateral Adnexa & Ovaries", "type": "text", "placeholder": "Normal / Corpus luteum noted"},
+                {"id": "pelvic_comments", "label": "Additional Pelvic Observations", "type": "textarea", "rows": 2},
+            ],
+        },
+        {
+            "id": "screening_impression",
+            "title": "Screening Results, Impression & Plan",
+            "fields": [
+                {
+                    "id": "aneuploidy_screening_requested",
+                    "label": "First-Trimester Screening Option",
+                    "type": "select",
+                    "options": [
+                        {"value": "ultrasound_only", "label": "Ultrasound NT Marker Only"},
+                        {"value": "combined_test", "label": "Combined Screening (NT + Dual Marker PAPP-A / free β-hCG)"},
+                        {"value": "nipt_advised", "label": "NIPT / Cell-Free DNA Advised"},
+                        {"value": "declined", "label": "Patient Declined Serum Screening"},
+                    ],
+                },
+                {
+                    "id": "risk_estimate",
+                    "label": "Risk Categorization / Software Reference",
+                    "type": "select",
+                    "options": [
+                        {"value": "low_risk", "label": "Low Risk / Screen Negative"},
+                        {"value": "intermediate_risk", "label": "Intermediate Risk (NIPT Advised)"},
+                        {"value": "high_risk", "label": "High Risk / Screen Positive (Invasive Diagnostic Advised)"},
+                        {"value": "pending_biochemistry", "label": "Awaiting Dual Marker Serum Biochemistry"},
+                    ],
+                },
+                {"id": "impression", "label": "Diagnostic Impression", "type": "textarea", "rows": 3, "placeholder": "Single live intrauterine gestation corresponding to 12w 3d by CRL. Normal NT measurement. Nasal bone present. Low risk profile on ultrasound markers."},
+                {"id": "recommendations", "label": "Recommendations & Follow-up", "type": "textarea", "rows": 2, "placeholder": "Targeted Imaging for Fetal Anomalies (TIFFA / Level-II Scan) recommended at 18 to 20 weeks."},
+            ],
+        },
+    ],
+}
+
+GROWTH_SCAN_SCHEMA = {
+    "plugin_id": "fertility",
+    "record_type": "growth_scan",
+    "schema_version": "1.0",
+    "title": "Obstetric Growth & Fetal Well-being Scan",
+    "description": "Fetal biometry, Hadlock 4-parameter EFW, amniotic fluid, and placental evaluation.",
+    "sections": [
+        {
+            "id": "exam_details",
+            "title": "Patient & Examination Details",
+            "fields": [
+                {"id": "scan_date", "label": "Scan Date", "type": "date", "required": True},
+                {"id": "referring_clinician", "label": "Referring Clinician", "type": "text"},
+                {"id": "obstetric_history", "label": "Obstetric History (G P A L)", "type": "text", "placeholder": "G2 P1 A0 L1"},
+                {"id": "lmp_date", "label": "Last Menstrual Period (LMP)", "type": "date"},
+                {"id": "edd_lmp", "label": "EDD by LMP", "type": "date", "formula": "edd_lmp", "helper_text": "Auto-calculated (LMP + 280 days)"},
+                {"id": "ga_lmp", "label": "GA by LMP", "type": "text", "formula": "ga_lmp", "helper_text": "Auto-calculated from LMP & scan date"},
+                {"id": "edd_prior_scan", "label": "EDD by Previous Dating Scan", "type": "date"},
+                {"id": "ga_prior_scan", "label": "GA by Previous Scan", "type": "text", "placeholder": "e.g. 28w 3d"},
+                {
+                    "id": "fetus_count",
+                    "label": "Number of Fetuses",
+                    "type": "select",
+                    "options": [
+                        {"value": "singleton", "label": "Singleton"},
+                        {"value": "twins", "label": "Twin Pregnancy"},
+                        {"value": "triplets", "label": "Triplet Pregnancy"},
+                    ],
+                },
+                {"id": "indication", "label": "Indication for Scan", "type": "text", "placeholder": "Routine interval growth evaluation, suspected FGR/IUGR, maternal diabetes"},
+            ],
+        },
+        {
+            "id": "fetal_status",
+            "title": "Fetal Status & Presentation",
+            "fields": [
+                {
+                    "id": "fetal_lie",
+                    "label": "Fetal Lie",
+                    "type": "select",
+                    "options": [
+                        {"value": "longitudinal", "label": "Longitudinal"},
+                        {"value": "transverse", "label": "Transverse"},
+                        {"value": "oblique", "label": "Oblique"},
+                    ],
+                },
+                {
+                    "id": "fetal_presentation",
+                    "label": "Presentation",
+                    "type": "select",
+                    "options": [
+                        {"value": "cephalic", "label": "Cephalic / Vertex"},
+                        {"value": "breech", "label": "Breech"},
+                        {"value": "shoulder", "label": "Shoulder"},
+                        {"value": "unstable", "label": "Unstable"},
+                    ],
+                },
+                {
+                    "id": "fetal_cardiac_activity",
+                    "label": "Cardiac Activity",
+                    "type": "select",
+                    "options": [
+                        {"value": "present_regular", "label": "Present & Regular"},
+                        {"value": "absent", "label": "Absent"},
+                    ],
+                },
+                {"id": "fetal_heart_rate_bpm", "label": "Fetal Heart Rate", "type": "number", "unit": "bpm", "min": 60, "max": 240, "placeholder": "142"},
+                {
+                    "id": "fetal_movements",
+                    "label": "Fetal Movements",
+                    "type": "select",
+                    "options": [
+                        {"value": "active_present", "label": "Active & Present"},
+                        {"value": "reduced", "label": "Reduced"},
+                        {"value": "absent", "label": "Absent during scan"},
+                    ],
+                },
+            ],
+        },
+        {
+            "id": "fetal_biometry",
+            "title": "Fetal Biometry (Enter in mm)",
+            "fields": [
+                {"id": "bpd_mm", "label": "Biparietal Diameter (BPD)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "78.4", "helper_text": "Outer to inner edge of calvarium across thalami"},
+                {"id": "hc_mm", "label": "Head Circumference (HC)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "285.2"},
+                {"id": "ac_mm", "label": "Abdominal Circumference (AC)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "270.8", "helper_text": "Transverse abdominal slice at umbilical vein/portal sinus & stomach bubble"},
+                {"id": "fl_mm", "label": "Femur Diaphysis Length (FL)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "60.2"},
+                {"id": "hl_mm", "label": "Humerus Length (HL - Optional)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "54.1"},
+                {"id": "efw_g", "label": "Estimated Fetal Weight (Hadlock 4-param)", "type": "number", "unit": "g", "formula": "hadlock_efw", "helper_text": "Auto-calculated via Hadlock 4-parameter log10 formula when BPD, HC, AC, FL entered"},
+                {"id": "efw_percentile", "label": "EFW Percentile", "type": "text", "placeholder": "e.g. 48th percentile", "helper_text": "Gestational-age specific reference chart"},
+                {"id": "ac_percentile", "label": "AC Percentile", "type": "text", "placeholder": "e.g. 42nd percentile"},
+                {"id": "composite_ga", "label": "Composite GA by Ultrasound", "type": "text", "placeholder": "e.g. 31w 2d"},
+            ],
+        },
+        {
+            "id": "liquor_placenta_cervix",
+            "title": "Amniotic Fluid, Placenta & Cervix",
+            "fields": [
+                {
+                    "id": "placental_location",
+                    "label": "Placental Location",
+                    "type": "select",
+                    "options": [
+                        {"value": "anterior", "label": "Anterior"},
+                        {"value": "posterior", "label": "Posterior"},
+                        {"value": "fundal", "label": "Fundal"},
+                        {"value": "right_lateral", "label": "Right Lateral"},
+                        {"value": "left_lateral", "label": "Left Lateral"},
+                        {"value": "placenta_praevia", "label": "Placenta Praevia"},
+                    ],
+                },
+                {
+                    "id": "placental_maturity_grade",
+                    "label": "Placental Grade",
+                    "type": "select",
+                    "options": [
+                        {"value": "grade_0", "label": "Grade 0 (Smooth chorionic plate)"},
+                        {"value": "grade_1", "label": "Grade I (Subtle indentations)"},
+                        {"value": "grade_2", "label": "Grade II (Indentations extending towards basal layer)"},
+                        {"value": "grade_3", "label": "Grade III (Complete cotyledons & calcifications)"},
+                    ],
+                },
+                {"id": "placental_edge_os_distance_mm", "label": "Placental Edge to Internal Os (mm)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "> 20 mm (Clear of os)"},
+                {"id": "afi_cm", "label": "Amniotic Fluid Index (AFI)", "type": "number", "unit": "cm", "step": "0.1", "placeholder": "14.5", "helper_text": "Normal range: 8 to 24 cm"},
+                {"id": "dvp_cm", "label": "Deepest Vertical Pocket (DVP)", "type": "number", "unit": "cm", "step": "0.1", "placeholder": "4.8", "helper_text": "Normal single deepest pocket: 2 to 8 cm"},
+                {
+                    "id": "amniotic_fluid_assessment",
+                    "label": "Amniotic Fluid Status",
+                    "type": "select",
+                    "options": [
+                        {"value": "normal_adequate", "label": "Normal / Adequate Volume"},
+                        {"value": "borderline_low", "label": "Borderline Low (AFI 5-8 cm)"},
+                        {"value": "oligohydramnios", "label": "Oligohydramnios (AFI < 5 cm or DVP < 2 cm)"},
+                        {"value": "polyhydramnios", "label": "Polyhydramnios (AFI > 24 cm or DVP > 8 cm)"},
+                    ],
+                },
+                {
+                    "id": "umbilical_cord_vessels",
+                    "label": "Umbilical Cord Vessels",
+                    "type": "select",
+                    "options": [
+                        {"value": "three_vessel", "label": "3-Vessel Cord (2 Arteries, 1 Vein)"},
+                        {"value": "two_vessel_sua", "label": "2-Vessel Cord (Single Umbilical Artery)"},
+                    ],
+                },
+                {
+                    "id": "cord_insertion",
+                    "label": "Placental Cord Insertion",
+                    "type": "select",
+                    "options": [
+                        {"value": "central", "label": "Central / Centric"},
+                        {"value": "eccentric", "label": "Eccentric"},
+                        {"value": "marginal", "label": "Marginal (Battledore)"},
+                        {"value": "velamentous", "label": "Velamentous"},
+                    ],
+                },
+                {"id": "cervical_length_mm", "label": "Cervical Length", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "36.0"},
+                {
+                    "id": "internal_os",
+                    "label": "Internal Cervical Os",
+                    "type": "select",
+                    "options": [
+                        {"value": "closed", "label": "Closed"},
+                        {"value": "funneling", "label": "Funneling Present"},
+                        {"value": "dilated", "label": "Dilated"},
+                    ],
+                },
+            ],
+        },
+        {
+            "id": "growth_impression",
+            "title": "Growth Assessment & Recommendations",
+            "fields": [
+                {
+                    "id": "growth_pattern",
+                    "label": "Growth Velocity Pattern",
+                    "type": "select",
+                    "options": [
+                        {"value": "appropriate", "label": "Appropriate for Gestational Age (AGA)"},
+                        {"value": "sga", "label": "Small for Gestational Age (SGA)"},
+                        {"value": "fgr", "label": "Fetal Growth Restriction (FGR / IUGR)"},
+                        {"value": "lga", "label": "Large for Gestational Age (LGA / Macrosomia)"},
+                    ],
+                },
+                {"id": "impression", "label": "Clinical Impression", "type": "textarea", "rows": 3, "placeholder": "Single live intrauterine pregnancy corresponding to 31w 2d. Fetal growth parameters are appropriate for gestational age (EFW around 48th centile). Normal amniotic fluid and placenta."},
+                {"id": "recommendations", "label": "Recommendations & Follow-up", "type": "textarea", "rows": 2, "placeholder": "Repeat interval growth scan with Doppler in 3 to 4 weeks, or earlier if clinically indicated."},
+            ],
+        },
+    ],
+}
+
+TIFFA_STATUS_OPTIONS = [
+    {"value": "normal", "label": "Normal"},
+    {"value": "abnormal", "label": "Abnormal (See Remarks)"},
+    {"value": "not_visualized", "label": "Not Adequately Visualized"},
+    {"value": "not_assessed", "label": "Not Assessed"},
+]
+
+TIFFA_SCAN_SCHEMA = {
+    "plugin_id": "fertility",
+    "record_type": "tiffa_scan",
+    "schema_version": "1.0",
+    "title": "TIFFA / Level-II Target Fetal Anatomy Scan (18-22w)",
+    "description": "Comprehensive 40-structure anatomical survey, soft marker screen, and congenital malformation evaluation.",
+    "sections": [
+        {
+            "id": "exam_details",
+            "title": "Patient & Examination Details",
+            "fields": [
+                {"id": "scan_date", "label": "Scan Date", "type": "date", "required": True},
+                {"id": "referring_clinician", "label": "Referring Clinician", "type": "text"},
+                {"id": "obstetric_history", "label": "Obstetric History (G P A L)", "type": "text", "placeholder": "G1 P0 A0 L0"},
+                {"id": "lmp_date", "label": "Last Menstrual Period (LMP)", "type": "date"},
+                {"id": "edd_lmp", "label": "EDD by LMP", "type": "date", "formula": "edd_lmp", "helper_text": "Auto-calculated (LMP + 280 days)"},
+                {"id": "ga_lmp", "label": "GA by LMP", "type": "text", "formula": "ga_lmp", "helper_text": "Auto-calculated from LMP & scan date"},
+                {"id": "edd_prior_scan", "label": "EDD by Previous Dating Scan", "type": "date"},
+                {"id": "ga_prior_scan", "label": "GA by Previous Scan", "type": "text", "placeholder": "e.g. 19w 4d"},
+                {
+                    "id": "fetus_count",
+                    "label": "Number of Fetuses",
+                    "type": "select",
+                    "options": [
+                        {"value": "singleton", "label": "Singleton"},
+                        {"value": "twins", "label": "Twin Pregnancy"},
+                        {"value": "triplets", "label": "Triplet Pregnancy"},
+                    ],
+                },
+                {"id": "indication", "label": "Indication for Scan", "type": "text", "placeholder": "Routine 18-22 week anomaly screening / TIFFA Level-II"},
+            ],
+        },
+        {
+            "id": "fetal_status_biometry",
+            "title": "Fetal Status & Biometry",
+            "fields": [
+                {"id": "fetal_lie_presentation", "label": "Fetal Lie / Presentation", "type": "text", "placeholder": "Longitudinal / Cephalic"},
+                {
+                    "id": "fetal_cardiac_activity",
+                    "label": "Cardiac Activity",
+                    "type": "select",
+                    "options": [
+                        {"value": "present_regular", "label": "Present & Regular"},
+                        {"value": "absent", "label": "Absent"},
+                    ],
+                },
+                {"id": "fetal_heart_rate_bpm", "label": "Fetal Heart Rate", "type": "number", "unit": "bpm", "min": 60, "max": 240, "placeholder": "148"},
+                {"id": "bpd_mm", "label": "BPD (mm)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "46.2"},
+                {"id": "hc_mm", "label": "HC (mm)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "172.5"},
+                {"id": "ac_mm", "label": "AC (mm)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "151.0"},
+                {"id": "fl_mm", "label": "FL (mm)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "32.4"},
+                {"id": "efw_g", "label": "Estimated Fetal Weight (Hadlock)", "type": "number", "unit": "g", "formula": "hadlock_efw", "helper_text": "Auto-calculated via Hadlock 4-param log10 formula"},
+            ],
+        },
+        {
+            "id": "cranium_brain",
+            "title": "Anatomy: Cranium, Brain & Posterior Fossa",
+            "fields": [
+                {"id": "skull_calvarium", "label": "Skull / Calvarium Integrity & Shape", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "midline_falx", "label": "Midline Falx & Interhemispheric Fissure", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "cavum_septi_pellucidi", "label": "Cavum Septi Pellucidi (CSP)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "lateral_ventricles", "label": "Lateral Ventricles (< 10 mm)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "choroid_plexus", "label": "Choroid Plexuses (No cysts)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "thalami", "label": "Thalami & Third Ventricle", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "cerebellum", "label": "Cerebellum (Dumbbell shape)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "cisterna_magna", "label": "Cisterna Magna (2 to 10 mm)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "nuchal_fold_mm", "label": "Nuchal Fold Thickness (< 6 mm)", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "3.5"},
+            ],
+        },
+        {
+            "id": "face_neck",
+            "title": "Anatomy: Fetal Face & Neck",
+            "fields": [
+                {"id": "face_profile", "label": "Facial Profile & Chin (Micrognathia ruled out)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "orbits", "label": "Orbits & Interocular Distance", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "upper_lip_palate", "label": "Upper Lip & Primary Palate (Cleft ruled out)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "nasal_bone_status", "label": "Nasal Bone", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "cervical_region_neck", "label": "Cervical Region & Neck (No cystic hygroma)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+            ],
+        },
+        {
+            "id": "spine_thorax",
+            "title": "Anatomy: Spine, Thorax & Diaphragm",
+            "fields": [
+                {"id": "cervical_spine", "label": "Cervical Spine", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "thoracic_spine", "label": "Thoracic Spine", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "lumbar_spine", "label": "Lumbar Spine", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "sacral_spine", "label": "Sacral Spine & Overlying Intact Skin", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "thorax_lungs", "label": "Thorax & Lungs (Symmetric, no mass)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "diaphragm", "label": "Diaphragm (Intact acoustic line bilaterally)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+            ],
+        },
+        {
+            "id": "fetal_cardiac",
+            "title": "Anatomy: Fetal Echocardiography Views",
+            "fields": [
+                {"id": "cardiac_situs_axis", "label": "Cardiac Situs & Axis (Levocardia ~45°)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "four_chamber_view", "label": "Four-Chamber View (Symmetric chambers, crux)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "lvot", "label": "Left Ventricular Outflow Tract (LVOT / Aorta)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "rvot", "label": "Right Ventricular Outflow Tract (RVOT / PA crossing)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "three_vessel_trachea_view", "label": "Three-Vessel & Trachea View (3VT / V-sign)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+            ],
+        },
+        {
+            "id": "abdomen_pelvis",
+            "title": "Anatomy: Abdominal Wall, GI & Urinary Tract",
+            "fields": [
+                {"id": "abdominal_wall", "label": "Abdominal Wall (Intact, no omphalocele/gastroschisis)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "cord_insertion_site", "label": "Umbilical Cord Insertion Site", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "stomach_bubble", "label": "Stomach Bubble (Left upper quadrant present)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "liver_abdominal_organs", "label": "Liver & Abdominal Organs", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "bowel_appearance", "label": "Bowel Echogenicity (Non-echogenic)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "right_kidney", "label": "Right Kidney & Renal Pelvis (< 4 mm)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "left_kidney", "label": "Left Kidney & Renal Pelvis (< 4 mm)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "urinary_bladder", "label": "Urinary Bladder (Normal filling & 2 paravesical arteries)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+            ],
+        },
+        {
+            "id": "limbs_extremities",
+            "title": "Anatomy: Limbs & Extremities",
+            "fields": [
+                {"id": "right_upper_limb", "label": "Right Upper Limb (Humerus, radius, ulna)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "left_upper_limb", "label": "Left Upper Limb (Humerus, radius, ulna)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "right_lower_limb", "label": "Right Lower Limb (Femur, tibia, fibula)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "left_lower_limb", "label": "Left Lower Limb (Femur, tibia, fibula)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "hands_feet_posture", "label": "Hands & Feet (5 digits, no clubfoot/talipes)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+            ],
+        },
+        {
+            "id": "placenta_cord_cervix",
+            "title": "Placenta, Cord, Amniotic Fluid & Cervix",
+            "fields": [
+                {"id": "placenta_anatomy", "label": "Placenta Location & Morphology", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "cord_vessel_count", "label": "Umbilical Cord (3 Vessels / 2A + 1V)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "amniotic_fluid_status", "label": "Amniotic Fluid Volume", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "cervix_assessment", "label": "Cervix & Internal Os (Closed)", "type": "select", "options": TIFFA_STATUS_OPTIONS},
+                {"id": "cervical_length_mm", "label": "Cervical Length", "type": "number", "unit": "mm", "step": "0.1", "placeholder": "37.5"},
+            ],
+        },
+        {
+            "id": "soft_markers_impression",
+            "title": "Soft Markers, Limitations, Impression & Recommendations",
+            "fields": [
+                {
+                    "id": "soft_markers_detected",
+                    "label": "Soft Marker Screen Findings",
+                    "type": "checkbox_group",
+                    "options": [
+                        {"value": "none", "label": "No Soft Markers Detected"},
+                        {"value": "thickened_nuchal_fold", "label": "Thickened Nuchal Fold (>= 6 mm)"},
+                        {"value": "eif", "label": "Echogenic Intracardiac Focus (EIF)"},
+                        {"value": "cpc", "label": "Choroid Plexus Cyst (CPC)"},
+                        {"value": "echogenic_bowel", "label": "Hyperechogenic Bowel"},
+                        {"value": "pyelectasis", "label": "Renal Pyelectasis (>= 4 mm)"},
+                        {"value": "sua", "label": "Single Umbilical Artery (SUA)"},
+                        {"value": "short_femur_humerus", "label": "Short Femur / Humerus (< 5th centile)"},
+                    ],
+                },
+                {"id": "technical_limitations", "label": "Examination Acoustic Windows / Technical Limitations", "type": "text", "placeholder": "Optimal imaging / Maternal habitus / Persistent prone fetal position"},
+                {"id": "impression", "label": "Diagnostic Impression", "type": "textarea", "rows": 3, "placeholder": "Targeted imaging for fetal anomalies (TIFFA) at 19w 4d reveals no major structural congenital malformations in the visualized anatomical structures. Fetal biometry corresponds to gestational age."},
+                {"id": "recommendations", "label": "Recommendations & Follow-up", "type": "textarea", "rows": 2, "placeholder": "Routine antenatal care. Fetal growth & well-being ultrasound scan recommended at 28 to 32 weeks."},
+            ],
+        },
+    ],
+}
+
+DOPPLER_BPP_SCAN_SCHEMA = {
+    "plugin_id": "fertility",
+    "record_type": "doppler_bpp_scan",
+    "schema_version": "1.0",
+    "title": "Obstetric Doppler & Biophysical Profile (BPP)",
+    "description": "Fetal hemodynamic surveillance (UA, MCA, CPR, Uterine Arteries) and Manning Biophysical Profile scoring.",
+    "sections": [
+        {
+            "id": "exam_details",
+            "title": "Patient & Examination Details",
+            "fields": [
+                {"id": "scan_date", "label": "Scan Date", "type": "date", "required": True},
+                {"id": "referring_clinician", "label": "Referring Clinician", "type": "text"},
+                {"id": "obstetric_history", "label": "Obstetric History (G P A L)", "type": "text", "placeholder": "G2 P1 A0 L1"},
+                {"id": "lmp_date", "label": "Last Menstrual Period (LMP)", "type": "date"},
+                {"id": "edd_lmp", "label": "EDD by LMP", "type": "date", "formula": "edd_lmp", "helper_text": "Auto-calculated (LMP + 280 days)"},
+                {"id": "ga_lmp", "label": "GA by LMP", "type": "text", "formula": "ga_lmp", "helper_text": "Auto-calculated from LMP & scan date"},
+                {"id": "edd_prior_scan", "label": "EDD by Previous Dating Scan", "type": "date"},
+                {"id": "ga_prior_scan", "label": "GA by Previous Scan", "type": "text", "placeholder": "e.g. 34w 2d"},
+                {
+                    "id": "fetus_count",
+                    "label": "Number of Fetuses",
+                    "type": "select",
+                    "options": [
+                        {"value": "singleton", "label": "Singleton"},
+                        {"value": "twins", "label": "Twin Pregnancy"},
+                    ],
+                },
+                {"id": "indication", "label": "Indication for Scan", "type": "text", "placeholder": "Fetal growth restriction (FGR), preeclampsia, PIH, oligohydramnios, reduced fetal movements"},
+            ],
+        },
+        {
+            "id": "fetal_status_liquor",
+            "title": "Fetal Status, Growth & Liquor",
+            "fields": [
+                {"id": "fetal_lie_presentation", "label": "Fetal Lie & Presentation", "type": "text", "placeholder": "Longitudinal / Cephalic"},
+                {
+                    "id": "fetal_cardiac_activity",
+                    "label": "Cardiac Activity",
+                    "type": "select",
+                    "options": [
+                        {"value": "present_regular", "label": "Present & Regular"},
+                        {"value": "absent", "label": "Absent"},
+                    ],
+                },
+                {"id": "fetal_heart_rate_bpm", "label": "Fetal Heart Rate", "type": "number", "unit": "bpm", "min": 60, "max": 240, "placeholder": "136"},
+                {"id": "efw_g", "label": "Estimated Fetal Weight (EFW)", "type": "number", "unit": "g", "placeholder": "2150"},
+                {"id": "efw_percentile", "label": "EFW Percentile", "type": "text", "placeholder": "e.g. 15th percentile"},
+                {"id": "afi_cm", "label": "Amniotic Fluid Index (AFI)", "type": "number", "unit": "cm", "step": "0.1", "placeholder": "11.2"},
+                {"id": "dvp_cm", "label": "Deepest Vertical Pocket (DVP)", "type": "number", "unit": "cm", "step": "0.1", "placeholder": "3.8"},
+            ],
+        },
+        {
+            "id": "doppler_measurements",
+            "title": "Fetal & Maternal Doppler Hemodynamics",
+            "fields": [
+                {"id": "umbilical_artery_ua_pi", "label": "Umbilical Artery (UA) PI", "type": "number", "unit": "PI", "step": "0.01", "placeholder": "0.92"},
+                {"id": "umbilical_artery_ua_ri", "label": "Umbilical Artery (UA) RI", "type": "number", "unit": "RI", "step": "0.01", "placeholder": "0.61"},
+                {"id": "umbilical_artery_sd_ratio", "label": "Umbilical Artery (UA) S/D Ratio", "type": "number", "step": "0.01", "placeholder": "2.56"},
+                {
+                    "id": "ua_end_diastolic_flow",
+                    "label": "UA End-Diastolic Flow (EDF)",
+                    "type": "select",
+                    "options": [
+                        {"value": "normal_forward", "label": "Normal Positive Forward EDF"},
+                        {"value": "reduced_edf", "label": "Reduced Forward EDF"},
+                        {"value": "absent_aedf", "label": "Absent End-Diastolic Flow (AEDF)"},
+                        {"value": "reversed_redf", "label": "Reversed End-Diastolic Flow (REDF)"},
+                    ],
+                },
+                {"id": "middle_cerebral_artery_mca_pi", "label": "Middle Cerebral Artery (MCA) PI", "type": "number", "unit": "PI", "step": "0.01", "placeholder": "1.74"},
+                {"id": "mca_ri", "label": "MCA RI", "type": "number", "unit": "RI", "step": "0.01", "placeholder": "0.78"},
+                {"id": "mca_psv_cm_s", "label": "MCA Peak Systolic Velocity (PSV)", "type": "number", "unit": "cm/s", "step": "0.1", "placeholder": "46.5"},
+                {"id": "mca_psv_mom", "label": "MCA PSV MoM", "type": "number", "unit": "MoM", "step": "0.01", "placeholder": "1.05"},
+                {"id": "cerebroplacental_ratio_cpr", "label": "Cerebroplacental Ratio (CPR)", "type": "number", "step": "0.01", "formula": "cpr", "helper_text": "Auto-calculated (MCA PI / UA PI). Value < 1.08 indicates brain sparing / redistribution"},
+                {"id": "cpr_percentile", "label": "CPR Percentile", "type": "text", "placeholder": "e.g. 35th percentile"},
+                {"id": "right_uterine_artery_pi", "label": "Right Uterine Artery PI", "type": "number", "unit": "PI", "step": "0.01", "placeholder": "0.72"},
+                {"id": "left_uterine_artery_pi", "label": "Left Uterine Artery PI", "type": "number", "unit": "PI", "step": "0.01", "placeholder": "0.78"},
+                {"id": "mean_uterine_artery_pi", "label": "Mean Uterine Artery PI", "type": "number", "unit": "PI", "step": "0.01", "formula": "mean_uterine_pi", "helper_text": "Auto-calculated average of Right and Left Uterine Artery PI"},
+                {
+                    "id": "right_uterine_notching",
+                    "label": "Right Uterine Artery Early Diastolic Notch",
+                    "type": "select",
+                    "options": [
+                        {"value": "absent", "label": "Absent (Normal low-resistance)"},
+                        {"value": "present", "label": "Present (High resistance)"},
+                    ],
+                },
+                {
+                    "id": "left_uterine_notching",
+                    "label": "Left Uterine Artery Early Diastolic Notch",
+                    "type": "select",
+                    "options": [
+                        {"value": "absent", "label": "Absent (Normal low-resistance)"},
+                        {"value": "present", "label": "Present (High resistance)"},
+                    ],
+                },
+                {
+                    "id": "ductus_venosus_flow",
+                    "label": "Ductus Venosus Doppler Waveform",
+                    "type": "select",
+                    "options": [
+                        {"value": "normal_forward_a_wave", "label": "Normal Positive A-wave"},
+                        {"value": "absent_a_wave", "label": "Absent A-wave"},
+                        {"value": "reversed_a_wave", "label": "Reversed A-wave (Late cardiac compromise)"},
+                        {"value": "not_assessed", "label": "Not Assessed"},
+                    ],
+                },
+            ],
+        },
+        {
+            "id": "biophysical_profile",
+            "title": "Manning Biophysical Profile (BPP Scorecard)",
+            "fields": [
+                {
+                    "id": "bpp_breathing",
+                    "label": "1. Fetal Breathing Movements",
+                    "type": "select",
+                    "options": [
+                        {"value": "2", "label": "Score 2 — ≥ 1 episode of continuous breathing ≥ 30 sec within 30 min"},
+                        {"value": "0", "label": "Score 0 — Absent or < 30 sec sustained breathing"},
+                    ],
+                },
+                {
+                    "id": "bpp_movements",
+                    "label": "2. Gross Body Movements",
+                    "type": "select",
+                    "options": [
+                        {"value": "2", "label": "Score 2 — ≥ 3 discrete trunk / limb movements within 30 min"},
+                        {"value": "0", "label": "Score 0 — ≤ 2 discrete body movements"},
+                    ],
+                },
+                {
+                    "id": "bpp_tone",
+                    "label": "3. Fetal Tone",
+                    "type": "select",
+                    "options": [
+                        {"value": "2", "label": "Score 2 — ≥ 1 episode of active extension with rapid return to flexion"},
+                        {"value": "0", "label": "Score 0 — Slow extension with partial flexion or flaccid posture"},
+                    ],
+                },
+                {
+                    "id": "bpp_fluid",
+                    "label": "4. Amniotic Fluid Volume",
+                    "type": "select",
+                    "options": [
+                        {"value": "2", "label": "Score 2 — At least 1 pocket of amniotic fluid measuring ≥ 2 cm in vertical axis"},
+                        {"value": "0", "label": "Score 0 — Largest pocket < 2 cm in vertical axis (Oligohydramnios)"},
+                    ],
+                },
+                {
+                    "id": "bpp_nst",
+                    "label": "5. Non-Stress Test (NST - If Performed)",
+                    "type": "select",
+                    "options": [
+                        {"value": "not_performed", "label": "Not Performed (Score out of 8)"},
+                        {"value": "2", "label": "Score 2 — Reactive: ≥ 2 accelerations ≥ 15 bpm for ≥ 15 sec in 20 min"},
+                        {"value": "0", "label": "Score 0 — Non-reactive: < 2 accelerations in 40 min"},
+                    ],
+                },
+                {"id": "bpp_score", "label": "Total BPP Score", "type": "text", "formula": "bpp_total", "helper_text": "Auto-calculated (e.g. 8/8 or 10/10). Normal: 8/8 or 8-10/10; Equivocal: 6/10 or 6/8; Abnormal: <= 4"},
+                {
+                    "id": "nst_interpretation",
+                    "label": "NST CTG Interpretation (if performed)",
+                    "type": "select",
+                    "options": [
+                        {"value": "reactive", "label": "Reactive CTG (Normal baseline & variability)"},
+                        {"value": "non_reactive", "label": "Non-reactive CTG"},
+                        {"value": "suspicious", "label": "Suspicious / Variable Decelerations"},
+                        {"value": "not_performed", "label": "Not Performed"},
+                    ],
+                },
+            ],
+        },
+        {
+            "id": "doppler_impression",
+            "title": "Hemodynamic Impression & Recommendations",
+            "fields": [
+                {"id": "impression", "label": "Clinical Impression", "type": "textarea", "rows": 3, "placeholder": "Obstetric Doppler and Biophysical Profile at 34w 2d shows normal feto-placental and middle cerebral artery hemodynamics with normal CPR. Normal BPP score 8/8. No evidence of fetal compromise or brain sparing."},
+                {"id": "recommendations", "label": "Recommendations & Follow-up", "type": "textarea", "rows": 2, "placeholder": "Continue routine fetal surveillance. Repeat Doppler and BPP in 1 to 2 weeks, or sooner if fetal movements decrease."},
+            ],
+        },
+    ],
+}
+

@@ -94,6 +94,11 @@ class InvoiceResponse(BaseModel):
     patient_id: UUID
     patient_name: Optional[str] = None
     patient_vid: Optional[str] = None
+    patient_mrn: Optional[str] = None
+    patient_age: Optional[int] = None
+    patient_gender: Optional[str] = None
+    patient_address: Optional[str] = None
+    patient_phone: Optional[str] = None
     appointment_source: Optional[str] = "OP"
     source_module: Optional[str] = "opd"
     source_reference_id: Optional[UUID] = None

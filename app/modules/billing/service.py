@@ -1,6 +1,6 @@
 import random
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_
 from sqlalchemy.orm import selectinload
@@ -104,12 +104,41 @@ class BillingService:
         total = invoice.total_amount
         paid = invoice.paid_amount
         pending = total - paid
+
+        patient_age = None
+        patient_gender = None
+        patient_address = None
+        patient_phone = None
+        patient_mrn = None
+
+        if patient:
+            patient_age = getattr(patient, "age", None)
+            if patient_age is None and getattr(patient, "dob", None):
+                try:
+                    today = date.today()
+                    patient_age = today.year - patient.dob.year - ((today.month, today.day) < (patient.dob.month, patient.dob.day))
+                except Exception:
+                    patient_age = None
+
+            raw_gender = getattr(patient, "gender", None)
+            if raw_gender:
+                patient_gender = raw_gender.value if hasattr(raw_gender, "value") else str(raw_gender)
+
+            patient_address = getattr(patient, "address", None)
+            patient_phone = getattr(patient, "phone", None)
+            patient_mrn = getattr(patient, "mrn", None) or getattr(patient, "vid", None)
+
         return InvoiceResponse(
             id=invoice.id,
             invoice_number=invoice.invoice_number,
             patient_id=invoice.patient_id,
             patient_name=patient.name if patient else None,
             patient_vid=patient.vid if patient else None,
+            patient_mrn=patient_mrn,
+            patient_age=patient_age,
+            patient_gender=patient_gender,
+            patient_address=patient_address,
+            patient_phone=patient_phone,
             appointment_source=invoice.appointment_source or "OP",
             source_module=getattr(invoice, "source_module", None) or (invoice.appointment_source or "opd").lower(),
             source_reference_id=getattr(invoice, "source_reference_id", None),

@@ -28,6 +28,7 @@ class TriageUpdate(BaseModel):
     vitals: dict
     chief_complaint: Optional[str] = None
     nurse_notes: Optional[str] = None
+    provisional_diagnosis: Optional[str] = None
 
 class AppointmentResponse(BaseModel):
     id: UUID
