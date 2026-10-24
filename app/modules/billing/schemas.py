@@ -58,6 +58,7 @@ class InvoiceCreate(BaseModel):
     discount_type: Optional[str] = None
     discount_reason: Optional[str] = None
     tax: Decimal = Decimal("0")
+    round_off: Optional[Decimal] = Decimal("0")
     paid_amount: Optional[Decimal] = None
     wallet_amount_used: Optional[Decimal] = None
     wallet_deduction: Optional[Decimal] = None
@@ -107,6 +108,7 @@ class InvoiceResponse(BaseModel):
     subtotal: Decimal
     discount: Decimal
     tax: Decimal
+    round_off: Optional[Decimal] = Decimal("0")
     total_amount: Decimal
     paid_amount: Decimal
     wallet_amount_used: Decimal = Decimal("0")

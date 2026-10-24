@@ -155,8 +155,10 @@ class PharmacyService:
 
         total_bill = sum(it.total for it in invoice_items)
         discount = Decimal(str(payload.discount or 0.0))
-        net_amount = max(Decimal("0.0"), total_bill - discount)
-        amount_paid = Decimal(str(payload.amount_paid)) if payload.amount_paid is not None else net_amount
+        raw_net = max(Decimal("0.0"), total_bill - discount)
+        rounded_total = Decimal(str(round(float(raw_net))))
+        round_off = Decimal(str(payload.round_off)) if payload.round_off is not None else (rounded_total - raw_net)
+        amount_paid = Decimal(str(payload.amount_paid)) if payload.amount_paid is not None else rounded_total
         wallet_used = Decimal(str(getattr(payload, 'wallet_amount_used', 0.0) or 0.0))
 
         split_items = None
@@ -185,6 +187,7 @@ class PharmacyService:
             reason_for_attendance="Point of Sale Pharmacy Dispense",
             items=invoice_items,
             discount=discount,
+            round_off=round_off,
             paid_amount=amount_paid,
             wallet_amount_used=wallet_used,
             payment_method=payload.payment_method or "Cash",
@@ -203,6 +206,7 @@ class PharmacyService:
             "invoice_status": invoice_resp.status,
             "subtotal": float(invoice_resp.subtotal),
             "discount": float(invoice_resp.discount),
+            "round_off": float(invoice_resp.round_off or 0.0),
             "total_amount": float(invoice_resp.total_amount),
             "paid_amount": float(invoice_resp.paid_amount),
             "payment_method": invoice_resp.payment_method,

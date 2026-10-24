@@ -147,6 +147,7 @@ class BillingService:
             subtotal=invoice.subtotal,
             discount=invoice.discount,
             tax=invoice.tax,
+            round_off=getattr(invoice, "round_off", None) or Decimal("0"),
             total_amount=invoice.total_amount,
             paid_amount=invoice.paid_amount,
             wallet_amount_used=invoice.wallet_amount_used or Decimal("0"),
@@ -178,9 +179,16 @@ class BillingService:
         discount = data.discount
         if not discount and getattr(data, "discount_value", None):
             discount = Decimal(str(data.discount_value))
-        total = max(Decimal("0"), subtotal - discount + data.tax)
+        if not discount:
+            discount = Decimal("0")
 
-        wallet_used = Decimal(str(data.wallet_amount_used or data.wallet_deduction or 0))
+        tax = data.tax if data.tax else Decimal("0")
+        raw_net = max(Decimal("0"), subtotal - discount + tax)
+        rounded_total = Decimal(str(round(float(raw_net))))
+        round_off = data.round_off if data.round_off is not None else (rounded_total - raw_net)
+        total = rounded_total
+
+        wallet_used = Decimal(str(round(float(data.wallet_amount_used or data.wallet_deduction or 0))))
         payment_method = data.payment_method or "cash"
         upi_pay_mode = data.upi_pay_mode
 
@@ -252,7 +260,7 @@ class BillingService:
                             "timestamp": datetime.utcnow().isoformat(),
                         })
             else:
-                direct_tender = Decimal(str(data.paid_amount or 0))
+                direct_tender = Decimal(str(round(float(data.paid_amount or 0))))
                 initial_paid = direct_tender + wallet_used
                 if wallet_used > Decimal("0"):
                     tx_list.append({
@@ -325,6 +333,7 @@ class BillingService:
             subtotal=subtotal,
             discount=discount,
             tax=data.tax,
+            round_off=round_off,
             total_amount=total,
             paid_amount=initial_paid,
             wallet_amount_used=wallet_used,
@@ -482,8 +491,9 @@ class BillingService:
             raise InvoiceNotFoundError("Invoice not found")
 
         if payload.discount and payload.discount > Decimal("0"):
-            invoice.discount = (invoice.discount or Decimal("0")) + payload.discount
-            invoice.total_amount = max(Decimal("0"), invoice.total_amount - payload.discount)
+            disc_rounded = Decimal(str(round(float(payload.discount))))
+            invoice.discount = (invoice.discount or Decimal("0")) + disc_rounded
+            invoice.total_amount = Decimal(str(round(float(max(Decimal("0"), invoice.total_amount - disc_rounded)))))
 
         total_payment_added = Decimal("0")
         split_entries = []
@@ -491,7 +501,7 @@ class BillingService:
 
         if is_split:
             for sp in payload.split_payments:
-                sp_amt = Decimal(str(sp.amount or 0))
+                sp_amt = Decimal(str(round(float(sp.amount or 0))))
                 if sp_amt <= Decimal("0"):
                     continue
                 total_payment_added += sp_amt
@@ -528,7 +538,7 @@ class BillingService:
 
             invoice.payment_method = "split"
         else:
-            total_payment_added = payload.amount
+            total_payment_added = Decimal(str(round(float(payload.amount))))
             is_wallet = payload.payment_method and "wallet" in payload.payment_method.lower()
             if is_wallet and payload.amount > Decimal("0"):
                 wallet_res = await self.db.execute(select(PatientWallet).where(PatientWallet.patient_id == invoice.patient_id))

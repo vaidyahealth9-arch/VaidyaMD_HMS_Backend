@@ -31,6 +31,7 @@ class Invoice(Base):
     subtotal = Column(Numeric(12, 2), nullable=False)
     discount = Column(Numeric(12, 2), default=0)
     tax = Column(Numeric(12, 2), default=0)
+    round_off = Column(Numeric(12, 2), default=0)
     total_amount = Column(Numeric(12, 2), nullable=False)
     paid_amount = Column(Numeric(12, 2), default=0)
     wallet_amount_used = Column(Numeric(12, 2), default=0)

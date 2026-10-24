@@ -49,6 +49,7 @@ class AuthService:
             phone=user.phone,
             tenant_id=user.tenant_id,
             branch_id=user.branch_id,
+            permission_profile_id=user.permission_profile_id,
             hospital_name=h_name,
             hospital_logo_url=h_logo,
             hospital_address=h_address,
@@ -261,6 +262,7 @@ class AuthService:
             phone=request.phone,
             tenant_id=tenant_id,
             branch_id=request.branch_id,
+            permission_profile_id=request.permission_profile_id,
             is_active=True,
         )
         self.db.add(user)
@@ -299,6 +301,8 @@ class AuthService:
             user.phone = request.phone
         if request.branch_id is not None:
             user.branch_id = request.branch_id
+        if request.permission_profile_id is not None:
+            user.permission_profile_id = request.permission_profile_id
         if request.is_active is not None:
             if user.role == UserRole.ADMIN and request.is_active is False:
                 user.is_active = True
