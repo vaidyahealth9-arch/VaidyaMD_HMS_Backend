@@ -78,6 +78,7 @@ async def init_db():
             "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source_module VARCHAR(100) DEFAULT 'opd';",
             "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source_reference_id UUID;",
             "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_transactions JSONB DEFAULT '[]'::jsonb;",
+            "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS round_off NUMERIC(12, 2) DEFAULT 0;",
             "ALTER TABLE ipd_admissions ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id);",
             "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id);",
             "ALTER TABLE clinical_records ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id);",
@@ -85,6 +86,8 @@ async def init_db():
             "ALTER TABLE inventory_batches ADD COLUMN IF NOT EXISTS pack_size INTEGER DEFAULT 1;",
             "ALTER TABLE crm_telecaller_sessions ADD COLUMN IF NOT EXISTS device_id VARCHAR(100);",
             "ALTER TABLE crm_telecaller_sessions ADD COLUMN IF NOT EXISTS is_revoked BOOLEAN DEFAULT FALSE;",
+            "UPDATE cosgyn_treatments SET price = 8000.00 WHERE (LOWER(name) LIKE '%tesla%' AND LOWER(name) NOT LIKE '%jet%' AND (LOWER(name) LIKE '%single%' OR tesla_chair_sessions = 1)) AND price < 8000.00;",
+            "UPDATE hospitals SET active_plugins = active_plugins || '[\"referrals\"]'::jsonb WHERE NOT (active_plugins @> '[\"referrals\"]'::jsonb);",
         ]
 
         for stmt in migrations:
@@ -132,4 +135,73 @@ async def init_db():
                 """))
         except Exception:
             pass
+
+        try:
+            async with conn.begin_nested():
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS referral_commission_configs (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        tenant_id UUID NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE UNIQUE,
+                        opd_pct DOUBLE PRECISION DEFAULT 10.0,
+                        pharmacy_pct DOUBLE PRECISION DEFAULT 5.0,
+                        iui_pct DOUBLE PRECISION DEFAULT 10.0,
+                        embryology_pct DOUBLE PRECISION DEFAULT 15.0,
+                        lims_pct DOUBLE PRECISION DEFAULT 10.0,
+                        ipd_pct DOUBLE PRECISION DEFAULT 10.0,
+                        other_pct DOUBLE PRECISION DEFAULT 5.0,
+                        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    );
+                """))
+        except Exception:
+            pass
+
+        try:
+            async with conn.begin_nested():
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS referring_doctors (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        tenant_id UUID NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE,
+                        name VARCHAR(255) NOT NULL,
+                        clinic_name VARCHAR(255),
+                        specialty VARCHAR(100),
+                        phone VARCHAR(50),
+                        email VARCHAR(255),
+                        address TEXT,
+                        bank_name VARCHAR(150),
+                        account_number VARCHAR(100),
+                        ifsc_code VARCHAR(50),
+                        upi_id VARCHAR(100),
+                        pan_number VARCHAR(50),
+                        custom_commission_pct DOUBLE PRECISION,
+                        notes TEXT,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    );
+                """))
+        except Exception:
+            pass
+
+        try:
+            async with conn.begin_nested():
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS referral_settlements (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        settlement_number VARCHAR(50) UNIQUE NOT NULL,
+                        tenant_id UUID NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE,
+                        doctor_name VARCHAR(255) NOT NULL,
+                        doctor_id UUID REFERENCES referring_doctors(id) ON DELETE SET NULL,
+                        amount_paid DOUBLE PRECISION NOT NULL,
+                        payment_method VARCHAR(50) DEFAULT 'neft',
+                        reference_number VARCHAR(100),
+                        settlement_date DATE DEFAULT CURRENT_DATE,
+                        notes TEXT,
+                        invoice_ids JSONB DEFAULT '[]'::jsonb NOT NULL,
+                        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    );
+                """))
+        except Exception:
+            pass
+
 

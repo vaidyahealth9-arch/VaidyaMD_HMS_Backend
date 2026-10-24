@@ -51,6 +51,7 @@ class DispenseRequest(BaseModel):
     upi_pay_mode: Optional[str] = None
     payment_ref: Optional[str] = None
     discount: Optional[float] = 0.0
+    round_off: Optional[float] = None
     amount_paid: Optional[float] = None
     wallet_amount_used: Optional[float] = 0.0
     split_payments: Optional[List[dict]] = None

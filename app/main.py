@@ -58,6 +58,7 @@ from app.modules.crm.router import router as crm_router
 from app.plugins.fertility.router import router as fertility_router
 from app.plugins.opd.router import router as opd_router
 from app.plugins.cosgyn.router import router as cosgyn_router
+from app.plugins.referrals.router import router as referrals_router
 
 # HL7 MLLP Server
 from app.core.hl7_server import start_hl7_mllp_server
@@ -207,6 +208,7 @@ for prefix in ["/api/plugins", "/plugins"]:
     app.include_router(fertility_router, prefix=prefix)
     app.include_router(opd_router, prefix=prefix)
     app.include_router(cosgyn_router, prefix=prefix)
+    app.include_router(referrals_router, prefix=prefix)
 
 # Mount CRM router under direct /api and root as well
 app.include_router(crm_router, prefix="/api")

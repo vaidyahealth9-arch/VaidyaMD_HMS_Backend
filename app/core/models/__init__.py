@@ -35,6 +35,7 @@ from app.plugins.cosgyn.models import (
     FrequencyType, SessionStatus,
     CosgynTreatment, CosgynPatientPlan, CosgynSession,
 )
+from app.plugins.referrals.models import ReferralCommissionConfig, ReferringDoctor, ReferralSettlement
 
 __all__ = [
     # Core
@@ -66,4 +67,8 @@ __all__ = [
     # CosGyn Plugin
     "FrequencyType", "SessionStatus",
     "CosgynTreatment", "CosgynPatientPlan", "CosgynSession",
+    # Referrals Plugin
+    "ReferralCommissionConfig",
+    "ReferringDoctor",
+    "ReferralSettlement",
 ]

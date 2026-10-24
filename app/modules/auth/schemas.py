@@ -26,6 +26,7 @@ class UserResponse(BaseModel):
     hospital_phone: Optional[str] = None
     hospital_email: Optional[str] = None
     active_plugins: Optional[list[str]] = None
+    permission_profile_id: Optional[UUID] = None
     is_active: bool = True
 
     class Config:
@@ -43,6 +44,7 @@ class UserCreateRequest(BaseModel):
     reg_number: Optional[str] = None
     phone: Optional[str] = None
     branch_id: Optional[UUID] = None
+    permission_profile_id: Optional[UUID] = None
 
 class AdminUserUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -56,6 +58,7 @@ class AdminUserUpdateRequest(BaseModel):
     reg_number: Optional[str] = None
     phone: Optional[str] = None
     branch_id: Optional[UUID] = None
+    permission_profile_id: Optional[UUID] = None
     is_active: Optional[bool] = None
 
 class UserUpdateRequest(BaseModel):
