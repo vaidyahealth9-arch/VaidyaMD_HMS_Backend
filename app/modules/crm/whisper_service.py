@@ -5,6 +5,7 @@ Designed for background non-blocking execution.
 """
 
 import os
+import asyncio
 import logging
 from typing import Optional
 from uuid import UUID
@@ -79,10 +80,14 @@ async def process_call_audio_transcription(call_log_id: UUID, audio_file_path: s
 
     if model:
         try:
-            # Run faster-whisper transcription
-            segments, info = model.transcribe(audio_file_path, beam_size=5, language="en")
-            transcript_text = " ".join([seg.text.strip() for seg in segments])
-            logger.info(f"Transcription finished for {call_log_id}. Detected language: {info.language} ({info.language_probability:.2f})")
+            # Run faster-whisper transcription off-thread to avoid blocking event loop
+            def _do_transcribe():
+                segments, info = model.transcribe(audio_file_path, beam_size=5)
+                text = " ".join([seg.text.strip() for seg in segments])
+                return text, info.language, info.language_probability
+
+            transcript_text, detected_lang, prob = await asyncio.to_thread(_do_transcribe)
+            logger.info(f"Transcription finished for {call_log_id}. Detected language: {detected_lang} ({prob:.2f})")
         except Exception as e:
             logger.error(f"Error during audio transcription for call {call_log_id}: {e}")
             status_result = "failed"

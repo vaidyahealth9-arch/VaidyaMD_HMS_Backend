@@ -45,6 +45,7 @@ class DispenseRequest(BaseModel):
     patient_id: UUID
     items: List[DispenseItem]
     doctor_id: Optional[Any] = None
+    indent_id: Optional[UUID] = None
     notes: Optional[str] = None
     branch_id: Optional[UUID] = None
     payment_method: Optional[str] = "Cash"

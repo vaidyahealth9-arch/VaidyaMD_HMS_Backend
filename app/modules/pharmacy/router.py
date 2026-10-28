@@ -110,10 +110,11 @@ async def delete_inventory_batch(
 @router.get("/indents/", include_in_schema=False)
 async def list_indents(
     status: Optional[str] = None,
+    indent_type: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     service: PharmacyService = Depends(get_pharmacy_service)
 ):
-    return await service.list_indents(status, tenant_id=current_user.tenant_id)
+    return await service.list_indents(status, indent_type=indent_type, tenant_id=current_user.tenant_id)
 
 @router.post("/indents", status_code=201)
 @router.post("/indents/", status_code=201, include_in_schema=False)
