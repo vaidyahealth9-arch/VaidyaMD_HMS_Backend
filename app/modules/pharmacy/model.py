@@ -91,6 +91,8 @@ class InventoryBatch(Base):
     mrp = Column(Float, default=0.0)
     selling_price = Column(Float, default=0.0)
     rack_location = Column(String(50), default="Cold Chain Fridge 1")
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey("pharmacy_vendors.id", ondelete="SET NULL"), nullable=True)
+    vendor_name = Column(String(150), nullable=True)
     is_active = Column(Boolean, default=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -113,3 +115,28 @@ class PharmacyVendor(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+
+class PharmacyPurchaseReturn(Base):
+    __tablename__ = "pharmacy_purchase_returns"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
+    return_number = Column(String(50), nullable=False, unique=True)
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey("pharmacy_vendors.id", ondelete="SET NULL"), nullable=True)
+    vendor_name = Column(String(150), nullable=False)
+    invoice_ref = Column(String(100), nullable=True)
+    return_date = Column(Date, default=date.today)
+    status = Column(String(50), default="Approved")
+    reason = Column(String(150), default="Near Expiry / Damaged")
+    items = Column(JSONB, default=list)
+    total_return_amount = Column(Float, default=0.0)
+    notes = Column(Text, nullable=True)
+    created_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    vendor = relationship("PharmacyVendor")
+    created_by = relationship("User", foreign_keys=[created_by_id])

@@ -185,12 +185,22 @@ class PharmacyService:
             note_str += f" | Payment Ref: {payload.payment_ref}"
 
         billing_service = BillingService(self.db)
+        effective_doc_id = None
+        if payload.doctor_id:
+            try:
+                import uuid
+                effective_doc_id = uuid.UUID(str(payload.doctor_id))
+            except Exception:
+                effective_doc_id = None
+
         invoice_create = InvoiceCreate(
             patient_id=payload.patient_id,
             appointment_source="Pharmacy",
             source_module="pharmacy",
             source_reference_id=getattr(payload, "indent_id", None),
             reason_for_attendance="Point of Sale Pharmacy Dispense",
+            doctor_id=effective_doc_id,
+            referring_doctor=getattr(payload, "referring_doctor", None) or getattr(payload, "doctor_name", None),
             items=invoice_items,
             discount=discount,
             round_off=round_off,

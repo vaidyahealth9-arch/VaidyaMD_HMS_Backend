@@ -137,7 +137,11 @@ async def list_doctors(
     service: AuthService = Depends(get_auth_service),
 ):
     users = await service.list_users(current_user.tenant_id)
-    return [u for u in users if u.is_doctor or u.role in ["doctor", "admin"]]
+    return [
+        u for u in users
+        if getattr(u, "is_active", True)
+        and (u.is_doctor or str(getattr(u.role, "value", u.role)).lower() in ["doctor", "consultant"])
+    ]
 
 @router.patch("/users/{user_id}", response_model=UserResponse)
 async def update_user(

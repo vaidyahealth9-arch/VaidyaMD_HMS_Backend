@@ -51,6 +51,8 @@ class InvoiceCreate(BaseModel):
     source_module: Optional[str] = None
     source_reference_id: Optional[UUID] = None
     reason_for_attendance: Optional[str] = None
+    doctor_id: Optional[UUID] = None
+    referring_doctor: Optional[str] = None
     selected_embryologist_id: Optional[UUID] = None
     items: list[InvoiceItem]
     discount: Decimal = Decimal("0")
@@ -104,6 +106,9 @@ class InvoiceResponse(BaseModel):
     source_module: Optional[str] = "opd"
     source_reference_id: Optional[UUID] = None
     reason_for_attendance: Optional[str] = None
+    doctor_id: Optional[UUID] = None
+    doctor_name: Optional[str] = None
+    referring_doctor: Optional[str] = None
     items: list[dict]
     subtotal: Decimal
     discount: Decimal

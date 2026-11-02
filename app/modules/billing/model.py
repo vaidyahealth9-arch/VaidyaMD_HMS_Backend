@@ -24,6 +24,8 @@ class Invoice(Base):
     source_module = Column(String(100), default="opd", comment="opd, ipd, pharmacy, lims, fertility, cosgyn, general")
     source_reference_id = Column(UUID(as_uuid=True), nullable=True, comment="Ref ID e.g. admission_id, appointment_id, indent_id")
     reason_for_attendance = Column(Text, nullable=True)
+    doctor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
+    referring_doctor = Column(String(150), nullable=True)
     selected_embryologist_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
     items = Column(JSONB, nullable=False)
@@ -50,6 +52,7 @@ class Invoice(Base):
 
     patient = relationship("Patient", back_populates="invoices")
     creator = relationship("User", foreign_keys=[created_by])
+    doctor = relationship("User", foreign_keys=[doctor_id], lazy="selectin")
     embryologist = relationship("User", foreign_keys=[selected_embryologist_id])
     branch = relationship("Branch", lazy="selectin")
 
