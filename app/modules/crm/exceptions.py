@@ -24,3 +24,8 @@ class LeadAlreadyConvertedException(HTTPException):
 class InvalidFileFormatException(HTTPException):
     def __init__(self, detail: str = "Unsupported audio or CSV file format"):
         super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+class TelecallerSessionNotFoundException(HTTPException):
+    def __init__(self, detail: str = "Telecaller session not found"):
+        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail=detail)

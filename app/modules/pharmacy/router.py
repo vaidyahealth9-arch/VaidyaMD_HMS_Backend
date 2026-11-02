@@ -8,7 +8,7 @@ from app.core.models import User
 from app.core.dependencies import get_current_user, get_branch_context
 from app.modules.pharmacy.service import PharmacyService
 from app.modules.pharmacy.schemas import (
-    IndentCreate, IndentStatusUpdate, PurchaseOrderCreate, GRNCreate, DispenseRequest
+    IndentCreate, IndentStatusUpdate, PurchaseOrderCreate, GRNCreate, DispenseRequest, PurchaseReturnCreate
 )
 
 router = APIRouter(prefix="/pharmacy", tags=["Pharmacy & Inventory (Clean Architecture)"], dependencies=[Depends(get_current_user)])
@@ -110,10 +110,11 @@ async def delete_inventory_batch(
 @router.get("/indents/", include_in_schema=False)
 async def list_indents(
     status: Optional[str] = None,
+    indent_type: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     service: PharmacyService = Depends(get_pharmacy_service)
 ):
-    return await service.list_indents(status, tenant_id=current_user.tenant_id)
+    return await service.list_indents(status, indent_type=indent_type, tenant_id=current_user.tenant_id)
 
 @router.post("/indents", status_code=201)
 @router.post("/indents/", status_code=201, include_in_schema=False)
@@ -364,3 +365,266 @@ async def import_pharmacy_stock_csv(
         raise HTTPException(status_code=422, detail=f"Stock CSV Import failed: {str(e)}")
 
 
+
+
+@router.get("/reports/agency-summary")
+@router.get("/reports/agency-summary/", include_in_schema=False)
+async def get_agency_summary_report(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Aggregates pharmacy distributor / agency purchase value, active inventory value,
+    and returns metrics per agency.
+    """
+    tenant_id = current_user.hospital_id or getattr(current_user, 'tenant_id', None)
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+
+    from sqlalchemy import select, func, and_
+    from app.modules.pharmacy.model import GoodsReceivedNote, InventoryBatch, PharmacyPurchaseReturn, PharmacyVendor
+
+    # 1. Total purchases per vendor from Goods Received Notes (GRN)
+    grn_stmt = select(
+        GoodsReceivedNote.vendor_name,
+        func.sum(GoodsReceivedNote.total_amount).label("total_purchased"),
+        func.count(GoodsReceivedNote.id).label("grn_count")
+    ).where(GoodsReceivedNote.tenant_id == tenant_id).group_by(GoodsReceivedNote.vendor_name)
+    grn_res = await db.execute(grn_stmt)
+    grn_rows = grn_res.all()
+
+    agency_map = {}
+    for r in grn_rows:
+        v_name = r.vendor_name or "Unknown Distributor"
+        agency_map[v_name] = {
+            "agency_name": v_name,
+            "total_purchases": round(float(r.total_purchased or 0.0), 2),
+            "grn_count": int(r.grn_count or 0),
+            "current_stock_value": 0.0,
+            "total_returns": 0.0,
+            "returns_count": 0,
+            "batches_count": 0
+        }
+
+    # 2. Current available inventory value per vendor
+    batch_stmt = select(InventoryBatch).where(
+        InventoryBatch.tenant_id == tenant_id,
+        InventoryBatch.quantity_available > 0
+    )
+    b_res = await db.execute(batch_stmt)
+    batches = b_res.scalars().all()
+    for b in batches:
+        v_name = getattr(b, 'vendor_name', None) or "Direct Stock / Registered Vendor"
+        if v_name not in agency_map:
+            agency_map[v_name] = {
+                "agency_name": v_name,
+                "total_purchases": 0.0,
+                "grn_count": 0,
+                "current_stock_value": 0.0,
+                "total_returns": 0.0,
+                "returns_count": 0,
+                "batches_count": 0
+            }
+        val = float(b.quantity_available or 0) * float(b.purchase_rate or 0.0)
+        agency_map[v_name]["current_stock_value"] += val
+        agency_map[v_name]["batches_count"] += 1
+
+    # 3. Total returns / debit notes per vendor
+    try:
+        ret_stmt = select(
+            PharmacyPurchaseReturn.vendor_name,
+            func.sum(PharmacyPurchaseReturn.total_return_amount).label("total_returns"),
+            func.count(PharmacyPurchaseReturn.id).label("ret_count")
+        ).where(PharmacyPurchaseReturn.tenant_id == tenant_id).group_by(PharmacyPurchaseReturn.vendor_name)
+        ret_res = await db.execute(ret_stmt)
+        for r in ret_res.all():
+            v_name = r.vendor_name or "Unknown Distributor"
+            if v_name in agency_map:
+                agency_map[v_name]["total_returns"] = round(float(r.total_returns or 0.0), 2)
+                agency_map[v_name]["returns_count"] = int(r.ret_count or 0)
+    except Exception:
+        pass
+
+    results = list(agency_map.values())
+    for item in results:
+        item["current_stock_value"] = round(item["current_stock_value"], 2)
+
+    return {
+        "status": "success",
+        "count": len(results),
+        "agencies": results
+    }
+
+
+@router.post("/returns")
+@router.post("/returns/", include_in_schema=False)
+async def create_purchase_return(
+    payload: PurchaseReturnCreate,
+    current_user: User = Depends(get_current_user),
+    service: PharmacyService = Depends(get_pharmacy_service),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Creates a Purchase Return (Debit Note) back to distributor agency
+    and automatically decrements inventory stock atomically.
+    """
+    tenant_id = current_user.hospital_id or getattr(current_user, 'tenant_id', None)
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+
+    from app.modules.pharmacy.model import InventoryBatch, PharmacyPurchaseReturn
+    from datetime import date
+    import random
+
+    return_num = f"PR-{date.today().strftime('%Y%m')}-{random.randint(1000, 9999)}"
+    total_val = 0.0
+    processed_items = []
+
+    for it in payload.items:
+        batch = await db.get(InventoryBatch, it.batch_id)
+        if not batch or batch.tenant_id != tenant_id:
+            raise HTTPException(status_code=404, detail=f"Batch {it.batch_number} ({it.item_code}) not found")
+
+        if batch.quantity_available < it.quantity:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot return {it.quantity} units of {batch.item_name}. Only {batch.quantity_available} available in stock."
+            )
+
+        # Atomically deduct returned units from available inventory
+        batch.quantity_available -= it.quantity
+        rate = float(it.purchase_rate or batch.purchase_rate or 0.0)
+        item_tot = round(it.quantity * rate, 2)
+        total_val += item_tot
+
+        processed_items.append({
+            "batch_id": str(batch.id),
+            "item_code": batch.item_code,
+            "item_name": batch.item_name,
+            "batch_number": batch.batch_number,
+            "expiry_date": batch.expiry_date.isoformat() if batch.expiry_date else None,
+            "quantity_returned": it.quantity,
+            "purchase_rate": rate,
+            "return_amount": item_tot,
+            "reason": it.reason or payload.reason
+        })
+
+    pr = PharmacyPurchaseReturn(
+        tenant_id=tenant_id,
+        branch_id=payload.branch_id or getattr(current_user, 'branch_id', None),
+        return_number=return_num,
+        vendor_id=payload.vendor_id,
+        vendor_name=payload.vendor_name,
+        invoice_ref=payload.invoice_ref,
+        return_date=date.today(),
+        status="Approved",
+        reason=payload.reason or "Near Expiry / Damaged",
+        items=processed_items,
+        total_return_amount=round(total_val, 2),
+        notes=payload.notes,
+        created_by_id=current_user.id
+    )
+    db.add(pr)
+    await db.commit()
+
+    return {
+        "status": "success",
+        "message": f"Purchase Return {return_num} approved and stock deducted.",
+        "return_number": return_num,
+        "total_amount": round(total_val, 2),
+        "items_count": len(processed_items)
+    }
+
+
+@router.get("/returns")
+@router.get("/returns/", include_in_schema=False)
+async def list_purchase_returns(
+    vendor_id: Optional[UUID] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """List purchase returns / debit notes issued to agencies."""
+    tenant_id = current_user.hospital_id or getattr(current_user, 'tenant_id', None)
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+
+    from sqlalchemy import select
+    from app.modules.pharmacy.model import PharmacyPurchaseReturn
+
+    stmt = select(PharmacyPurchaseReturn).where(PharmacyPurchaseReturn.tenant_id == tenant_id)
+    if vendor_id:
+        stmt = stmt.where(PharmacyPurchaseReturn.vendor_id == vendor_id)
+    stmt = stmt.order_by(PharmacyPurchaseReturn.created_at.desc())
+
+    res = await db.execute(stmt)
+    returns = res.scalars().all()
+    return returns
+
+
+@router.get("/vendors/{vendor_id}/ledger")
+@router.get("/vendors/{vendor_id}/ledger/", include_in_schema=False)
+async def get_vendor_ledger(
+    vendor_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Calculates running financial statement for a distributor vendor:
+    Bills (GRNs) vs Returns (Debit Notes) vs Net Payable.
+    """
+    tenant_id = current_user.hospital_id or getattr(current_user, 'tenant_id', None)
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+
+    from sqlalchemy import select
+    from app.modules.pharmacy.model import PharmacyVendor, GoodsReceivedNote, PharmacyPurchaseReturn
+
+    vendor = await db.get(PharmacyVendor, vendor_id)
+    if not vendor or vendor.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+
+    grn_stmt = select(GoodsReceivedNote).where(
+        GoodsReceivedNote.tenant_id == tenant_id,
+        GoodsReceivedNote.vendor_name == vendor.name
+    ).order_by(GoodsReceivedNote.created_at.asc())
+    grn_res = await db.execute(grn_stmt)
+    grns = grn_res.scalars().all()
+
+    ret_stmt = select(PharmacyPurchaseReturn).where(
+        PharmacyPurchaseReturn.tenant_id == tenant_id,
+        PharmacyPurchaseReturn.vendor_name == vendor.name
+    ).order_by(PharmacyPurchaseReturn.created_at.asc())
+    ret_res = await db.execute(ret_stmt)
+    returns = ret_res.scalars().all()
+
+    total_bills = sum(float(g.total_amount or 0.0) for g in grns)
+    total_debit_notes = sum(float(r.total_return_amount or 0.0) for r in returns)
+    net_payable = round(total_bills - total_debit_notes, 2)
+
+    return {
+        "vendor_id": str(vendor.id),
+        "vendor_name": vendor.name,
+        "gst_number": vendor.gst_number,
+        "contact_phone": vendor.contact_phone,
+        "total_bills_invoiced": round(total_bills, 2),
+        "total_returns_credited": round(total_debit_notes, 2),
+        "net_balance_due": net_payable,
+        "invoices_count": len(grns),
+        "returns_count": len(returns),
+        "recent_invoices": [
+            {
+                "grn_number": g.grn_number,
+                "invoice_number": g.invoice_number,
+                "invoice_date": g.invoice_date.isoformat() if g.invoice_date else None,
+                "amount": float(g.total_amount or 0.0)
+            } for g in grns[-10:]
+        ],
+        "recent_returns": [
+            {
+                "return_number": r.return_number,
+                "return_date": r.return_date.isoformat() if r.return_date else None,
+                "amount": float(r.total_return_amount or 0.0),
+                "reason": r.reason
+            } for r in returns[-10:]
+        ]
+    }

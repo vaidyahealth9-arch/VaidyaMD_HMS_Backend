@@ -45,6 +45,9 @@ class DispenseRequest(BaseModel):
     patient_id: UUID
     items: List[DispenseItem]
     doctor_id: Optional[Any] = None
+    doctor_name: Optional[str] = None
+    referring_doctor: Optional[str] = None
+    indent_id: Optional[UUID] = None
     notes: Optional[str] = None
     branch_id: Optional[UUID] = None
     payment_method: Optional[str] = "Cash"
@@ -55,3 +58,23 @@ class DispenseRequest(BaseModel):
     amount_paid: Optional[float] = None
     wallet_amount_used: Optional[float] = 0.0
     split_payments: Optional[List[dict]] = None
+
+
+class PurchaseReturnItem(BaseModel):
+    batch_id: UUID
+    item_code: str
+    item_name: str
+    batch_number: str
+    quantity: int
+    purchase_rate: Optional[float] = 0.0
+    return_amount: Optional[float] = 0.0
+    reason: Optional[str] = "Near Expiry / Damaged"
+
+class PurchaseReturnCreate(BaseModel):
+    vendor_id: Optional[UUID] = None
+    vendor_name: str
+    invoice_ref: Optional[str] = None
+    reason: Optional[str] = "Near Expiry / Damaged"
+    items: List[PurchaseReturnItem]
+    notes: Optional[str] = None
+    branch_id: Optional[UUID] = None

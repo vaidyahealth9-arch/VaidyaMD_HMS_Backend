@@ -97,12 +97,14 @@ class CallLogResponse(BaseModel):
     tenant_id: UUID
     branch_id: Optional[UUID] = None
     lead_id: UUID
+    lead_name: Optional[str] = None
     telecaller_id: UUID
     phone_dialed: str
     call_started_at: datetime
     call_ended_at: Optional[datetime] = None
     duration_seconds: int
     recording_file_path: Optional[str] = None
+    recording_url: Optional[str] = None
     transcript_text: Optional[str] = None
     transcript_status: str
     whisper_model_used: Optional[str] = None
@@ -174,6 +176,7 @@ class TelecallerRosterItem(BaseModel):
 class TelecallerKPIItem(BaseModel):
     user_id: UUID
     user_name: str
+    email: Optional[str] = None
     total_calls: int
     answered_calls: int
     total_duration_seconds: int
@@ -181,3 +184,8 @@ class TelecallerKPIItem(BaseModel):
     conversions: int
     conversion_rate_percentage: float
     overdue_follow_ups: int
+    callback_count: int = 0
+    not_interested_count: int = 0
+    dnd_invalid_count: int = 0
+    wrong_number_count: int = 0
+    skipped_count: int = 0

@@ -19,7 +19,7 @@ from app.modules.notifications.model import Notification, NotificationType
 from app.modules.templates.model import ProtocolTemplate, ProtocolDrugRule, ClinicalTemplate
 from app.modules.wallet.model import PatientWallet, WalletTransaction, WalletTxType
 from app.modules.ipd.model import Ward, Bed, IPDAdmission, NursingTask
-from app.modules.pharmacy.model import PharmacyIndent, PurchaseOrder, GoodsReceivedNote, InventoryBatch, PharmacyVendor
+from app.modules.pharmacy.model import PharmacyIndent, PurchaseOrder, GoodsReceivedNote, InventoryBatch, PharmacyVendor, PharmacyPurchaseReturn
 from app.modules.counseling.models import CounselingNote
 from app.modules.auth.models import RefreshToken
 from app.modules.crm.model import Lead, CallLog, LeadStatusHistory, TelecallerSession, LeadStatus, LeadSource, CallDisposition
@@ -54,7 +54,7 @@ __all__ = [
     "ProtocolTemplate", "ProtocolDrugRule",
     "PatientWallet", "WalletTransaction", "WalletTxType",
     "Ward", "Bed", "IPDAdmission", "NursingTask",
-    "PharmacyIndent", "PurchaseOrder", "GoodsReceivedNote", "InventoryBatch", "PharmacyVendor",
+    "PharmacyIndent", "PurchaseOrder", "GoodsReceivedNote", "InventoryBatch", "PharmacyVendor", "PharmacyPurchaseReturn",
     "CounselingNote",
     "RefreshToken",
     # CRM & Telecaller

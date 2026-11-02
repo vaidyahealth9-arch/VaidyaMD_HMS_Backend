@@ -299,3 +299,154 @@ async def consume_package_service(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+
+@router.get("/reports/doctor-revenue")
+async def get_doctor_revenue_report(
+    doctor_id: Optional[UUID] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Aggregates financial performance grouped by doctor:
+    1. Consultation & procedure clinical revenue.
+    2. Linked pharmacy sales prescribed by each doctor.
+    3. Consolidated doctor revenue settlement.
+    """
+    tenant_id = current_user.hospital_id or getattr(current_user, 'tenant_id', None)
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+
+    from sqlalchemy import select, and_, or_
+    from app.modules.billing.model import Invoice, InvoiceStatus
+    from datetime import datetime
+
+    conditions = [
+        Invoice.tenant_id == tenant_id,
+        Invoice.status != InvoiceStatus.CANCELLED
+    ]
+
+    if doctor_id:
+        conditions.append(Invoice.doctor_id == doctor_id)
+
+    if start_date:
+        try:
+            s_dt = datetime.fromisoformat(start_date)
+            conditions.append(Invoice.created_at >= s_dt)
+        except Exception:
+            pass
+
+    if end_date:
+        try:
+            e_dt = datetime.fromisoformat(end_date)
+            conditions.append(Invoice.created_at <= e_dt)
+        except Exception:
+            pass
+
+    from app.core.models.user import User, UserRole
+
+    # 1. Pre-seed doctor_map with ALL onboarded doctors from user roles in this tenant
+    doctor_map = {}
+    name_lookup = {}
+
+    doc_stmt = select(User).where(
+        User.tenant_id == tenant_id,
+        User.is_active == True,
+        or_(
+            User.is_doctor == True,
+            User.role == UserRole.DOCTOR,
+        )
+    )
+    doc_res = await db.execute(doc_stmt)
+    tenant_doctors = doc_res.scalars().all()
+
+    for doc in tenant_doctors:
+        d_key = str(doc.id)
+        d_name = doc.name if doc.name.startswith("Dr") else f"Dr. {doc.name}"
+        doctor_map[d_key] = {
+            "doctor_key": d_key,
+            "doctor_id": str(doc.id),
+            "doctor_name": d_name,
+            "specialization": doc.specialization or (doc.departments[0] if doc.departments else "Consultant Specialist"),
+            "qualification": doc.qualification or "MBBS, MD/MS",
+            "consultation_revenue": 0.0,
+            "procedure_revenue": 0.0,
+            "pharmacy_sales": 0.0,
+            "total_revenue": 0.0,
+            "invoices_count": 0,
+            "pharmacy_invoices_count": 0,
+        }
+        # Build normalized name key for matching referring_doctor strings
+        clean_name = doc.name.lower().replace("dr.", "").replace("dr ", "").strip()
+        name_lookup[clean_name] = d_key
+
+    stmt = select(Invoice).where(and_(*conditions))
+    res = await db.execute(stmt)
+    invoices = res.scalars().all()
+
+    for inv in invoices:
+        # Match by explicit doctor_id or referring doctor name
+        matched_key = None
+        if inv.doctor_id and str(inv.doctor_id) in doctor_map:
+            matched_key = str(inv.doctor_id)
+        elif inv.referring_doctor:
+            clean_ref = inv.referring_doctor.lower().replace("dr.", "").replace("dr ", "").strip()
+            if clean_ref in name_lookup:
+                matched_key = name_lookup[clean_ref]
+            else:
+                for k, v in name_lookup.items():
+                    if k in clean_ref or clean_ref in k:
+                        matched_key = v
+                        break
+
+        if not matched_key:
+            doc_key = str(inv.doctor_id) if inv.doctor_id else (inv.referring_doctor or "Hospital General Desk")
+            doc_name = inv.referring_doctor or (inv.doctor.name if getattr(inv, 'doctor', None) else "Hospital General Desk")
+            if doc_name and not doc_name.startswith("Dr"):
+                doc_name = f"Dr. {doc_name}"
+            matched_key = doc_key
+
+            if matched_key not in doctor_map:
+                doctor_map[matched_key] = {
+                    "doctor_key": matched_key,
+                    "doctor_id": str(inv.doctor_id) if inv.doctor_id else None,
+                    "doctor_name": doc_name,
+                    "specialization": "External / Referral",
+                    "qualification": "",
+                    "consultation_revenue": 0.0,
+                    "procedure_revenue": 0.0,
+                    "pharmacy_sales": 0.0,
+                    "total_revenue": 0.0,
+                    "invoices_count": 0,
+                    "pharmacy_invoices_count": 0,
+                }
+
+        rec = doctor_map[matched_key]
+        total_inv = float(inv.total_amount or 0.0)
+        rec["total_revenue"] += total_inv
+        rec["invoices_count"] += 1
+
+        src = (inv.source_module or inv.appointment_source or "").lower()
+        if "pharma" in src:
+            rec["pharmacy_sales"] += total_inv
+            rec["pharmacy_invoices_count"] += 1
+        elif "ipd" in src or "fertility" in src or "cosgyn" in src:
+            rec["procedure_revenue"] += total_inv
+        else:
+            rec["consultation_revenue"] += total_inv
+
+    # Round figures for financial accuracy
+    result_list = list(doctor_map.values())
+    for item in result_list:
+        item["consultation_revenue"] = round(item["consultation_revenue"], 2)
+        item["procedure_revenue"] = round(item["procedure_revenue"], 2)
+        item["pharmacy_sales"] = round(item["pharmacy_sales"], 2)
+        item["total_revenue"] = round(item["total_revenue"], 2)
+
+    return {
+        "status": "success",
+        "count": len(result_list),
+        "doctors": result_list
+    }

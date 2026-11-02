@@ -1,7 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from uuid import UUID
 from typing import Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 class ClinicalRecordCreate(BaseModel):
     patient_id: UUID
@@ -23,6 +23,14 @@ class ClinicalRecordResponse(BaseModel):
     created_by: Optional[UUID] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @field_serializer("created_at", "updated_at", when_used="json")
+    def serialize_datetime(self, v: Optional[datetime]) -> Optional[str]:
+        if v is None:
+            return None
+        if v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc).isoformat()
+        return v.isoformat()
 
     class Config:
         from_attributes = True

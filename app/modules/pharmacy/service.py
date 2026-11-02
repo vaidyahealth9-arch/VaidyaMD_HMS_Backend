@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from uuid import UUID
 from typing import Optional, List, Dict, Any
 
@@ -80,7 +80,10 @@ class PharmacyService:
                 select(InventoryBatch)
                 .where(
                     InventoryBatch.tenant_id == tenant_id,
-                    InventoryBatch.item_code == item.item_code,
+                    or_(
+                        InventoryBatch.item_code == item.item_code,
+                        func.lower(InventoryBatch.item_name) == item.item_code.lower()
+                    ),
                     InventoryBatch.quantity_available > 0,
                     InventoryBatch.is_active == True,
                 )
@@ -96,7 +99,10 @@ class PharmacyService:
                 # Check if inactive batches exist for this item code
                 inactive_q = select(InventoryBatch).where(
                     InventoryBatch.tenant_id == tenant_id,
-                    InventoryBatch.item_code == item.item_code,
+                    or_(
+                        InventoryBatch.item_code == item.item_code,
+                        func.lower(InventoryBatch.item_name) == item.item_code.lower()
+                    ),
                 )
                 if branch_id:
                     inactive_q = inactive_q.where(or_(InventoryBatch.branch_id == branch_id, InventoryBatch.branch_id.is_(None)))
@@ -179,12 +185,22 @@ class PharmacyService:
             note_str += f" | Payment Ref: {payload.payment_ref}"
 
         billing_service = BillingService(self.db)
+        effective_doc_id = None
+        if payload.doctor_id:
+            try:
+                import uuid
+                effective_doc_id = uuid.UUID(str(payload.doctor_id))
+            except Exception:
+                effective_doc_id = None
+
         invoice_create = InvoiceCreate(
             patient_id=payload.patient_id,
             appointment_source="Pharmacy",
             source_module="pharmacy",
             source_reference_id=getattr(payload, "indent_id", None),
             reason_for_attendance="Point of Sale Pharmacy Dispense",
+            doctor_id=effective_doc_id,
+            referring_doctor=getattr(payload, "referring_doctor", None) or getattr(payload, "doctor_name", None),
             items=invoice_items,
             discount=discount,
             round_off=round_off,
@@ -198,6 +214,15 @@ class PharmacyService:
             branch_id=branch_id,
         )
         invoice_resp = await billing_service.create_invoice(invoice_create, tenant_id=tenant_id)
+
+        if getattr(payload, "indent_id", None):
+            try:
+                indent_to_fulfill = await self.db.get(PharmacyIndent, payload.indent_id)
+                if indent_to_fulfill:
+                    indent_to_fulfill.status = "Fulfilled"
+                    await self.db.flush()
+            except Exception:
+                pass
 
         return {
             "message": "Medications dispensed successfully via FEFO logic.",
@@ -222,12 +247,14 @@ class PharmacyService:
             "dispensed_batches": dispensed_items_audit,
         }
 
-    async def list_indents(self, status: str = None, tenant_id: UUID = None):
+    async def list_indents(self, status: str = None, indent_type: str = None, tenant_id: UUID = None):
         query = select(PharmacyIndent).order_by(PharmacyIndent.created_at.desc())
         if tenant_id:
             query = query.where(PharmacyIndent.tenant_id == tenant_id)
         if status:
             query = query.where(PharmacyIndent.status == status)
+        if indent_type:
+            query = query.where(PharmacyIndent.indent_type == indent_type)
         res = await self.db.execute(query)
         return res.scalars().all()
 

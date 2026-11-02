@@ -8,7 +8,7 @@ import io
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime, date, time, timedelta
-from sqlalchemy import select, func, and_, or_, desc
+from sqlalchemy import select, func, and_, or_, desc, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.models.user import User
@@ -22,7 +22,8 @@ from app.modules.crm.schemas import (
     HeartbeatPayload, TelecallerRosterItem, TelecallerKPIItem
 )
 from app.modules.crm.exceptions import (
-    LeadNotFoundException, CallLogNotFoundException, InvalidFileFormatException
+    LeadNotFoundException, CallLogNotFoundException, InvalidFileFormatException,
+    TelecallerSessionNotFoundException
 )
 
 
@@ -40,6 +41,7 @@ class CRMService:
         branch_id: Optional[UUID] = None,
         status: Optional[LeadStatus] = None,
         source: Optional[LeadSource] = None,
+        city: Optional[str] = None,
         search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
@@ -52,6 +54,8 @@ class CRMService:
             query = query.where(Lead.status == status)
         if source:
             query = query.where(Lead.source == source)
+        if city:
+            query = query.where(Lead.city.ilike(f"%{city}%"))
         if search:
             search_filter = f"%{search}%"
             query = query.where(
@@ -172,6 +176,12 @@ class CRMService:
         skipped_count = 0
         errors = []
 
+        # Query existing phones in tenant to prevent duplicate calls
+        existing_phones_stmt = select(Lead.phone).where(Lead.tenant_id == tenant_id)
+        existing_res = await self.db.execute(existing_phones_stmt)
+        existing_phones = {p.strip().replace(" ", "") for p in existing_res.scalars().all() if p}
+        seen_in_batch = set()
+
         for row_idx, row in enumerate(reader, start=1):
             if not row:
                 continue
@@ -199,6 +209,13 @@ class CRMService:
                 skipped_count += 1
                 errors.append(f"Row {row_idx}: Missing required name or phone")
                 continue
+
+            clean_phone = phone.strip().replace(" ", "")
+            if clean_phone in existing_phones or clean_phone in seen_in_batch:
+                skipped_count += 1
+                errors.append(f"Row {row_idx}: Skipped duplicate phone {clean_phone}")
+                continue
+            seen_in_batch.add(clean_phone)
 
             city = (
                 normalized_row.get("city")
@@ -395,6 +412,54 @@ class CRMService:
         await self.db.refresh(call_log)
         return call_log
 
+    async def log_call_end(
+        self,
+        call_id: UUID,
+        tenant_id: UUID,
+        duration_seconds: int
+    ) -> CallLog:
+        stmt = select(CallLog).where(and_(CallLog.id == call_id, CallLog.tenant_id == tenant_id))
+        call_log = (await self.db.execute(stmt)).scalar_one_or_none()
+        if not call_log:
+            raise CallLogNotFoundException()
+
+        now = datetime.utcnow()
+        call_log.call_ended_at = now
+        if duration_seconds > 0:
+            call_log.duration_seconds = duration_seconds
+        elif call_log.call_started_at:
+            call_log.duration_seconds = max(int((now - call_log.call_started_at).total_seconds()), 1)
+
+        await self.db.commit()
+        await self.db.refresh(call_log)
+        return call_log
+
+    async def list_call_logs(
+        self,
+        tenant_id: UUID,
+        telecaller_id: Optional[UUID] = None,
+        lead_id: Optional[UUID] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[CallLog]:
+        stmt = (
+            select(CallLog, Lead.name.label("lead_name"))
+            .outerjoin(Lead, CallLog.lead_id == Lead.id)
+            .where(CallLog.tenant_id == tenant_id)
+        )
+        if telecaller_id:
+            stmt = stmt.where(CallLog.telecaller_id == telecaller_id)
+        if lead_id:
+            stmt = stmt.where(CallLog.lead_id == lead_id)
+        stmt = stmt.order_by(desc(CallLog.call_started_at)).offset(offset).limit(limit)
+        res = await self.db.execute(stmt)
+        items = []
+        for call_log, lead_name in res.all():
+            setattr(call_log, "lead_name", lead_name)
+            setattr(call_log, "recording_url", f"/api/crm/calls/{call_log.id}/recording" if call_log.recording_file_path else None)
+            items.append(call_log)
+        return items
+
     # ------------------------------------------------------------------------
     # Manager Dashboard KPIs
     # ------------------------------------------------------------------------
@@ -513,7 +578,7 @@ class CRMService:
         stmt = select(TelecallerSession).where(and_(TelecallerSession.user_id == user_id, TelecallerSession.tenant_id == tenant_id))
         session = (await self.db.execute(stmt)).scalar_one_or_none()
         if not session:
-            raise HTTPException(status_code=404, detail="Telecaller session not found")
+            raise TelecallerSessionNotFoundException("Telecaller session not found")
         session.is_revoked = True
         session.is_online = False
         session.current_state = "revoked"
@@ -529,6 +594,7 @@ class CRMService:
         """
         Returns all registered telecallers with live online/offline status,
         current call states, and daily metrics.
+        Optimized with single grouped aggregation query.
         """
         stmt = (
             select(TelecallerSession, User, Lead)
@@ -542,6 +608,28 @@ class CRMService:
         results = (await self.db.execute(stmt)).all()
         now = datetime.utcnow()
         today_start = datetime.combine(date.today(), time.min)
+
+        # Batch aggregate all telecallers' stats for today in a single query
+        summary_stmt = (
+            select(
+                CallLog.telecaller_id,
+                func.count(CallLog.id).label("calls_today"),
+                func.coalesce(func.sum(CallLog.duration_seconds), 0).label("talk_time_secs"),
+                func.count(CallLog.id).filter(CallLog.disposition == CallDisposition.CONVERTED_APPOINTMENT).label("conversions_today")
+            )
+            .where(and_(CallLog.tenant_id == tenant_id, CallLog.call_started_at >= today_start))
+            .group_by(CallLog.telecaller_id)
+        )
+        summary_rows = (await self.db.execute(summary_stmt)).all()
+        stats_by_telecaller = {
+            row.telecaller_id: {
+                "calls": row.calls_today or 0,
+                "talk_time": row.talk_time_secs or 0,
+                "conversions": row.conversions_today or 0,
+            }
+            for row in summary_rows
+        }
+
         roster_items: List[TelecallerRosterItem] = []
 
         for session, user, current_lead in results:
@@ -549,29 +637,10 @@ class CRMService:
             is_active_online = session.is_online and not session.is_revoked and (now - session.last_heartbeat_at < timedelta(seconds=90))
             display_state = "revoked" if session.is_revoked else (session.current_state if is_active_online else "offline")
 
-            # Compute calls today & conversions today for this telecaller
-            calls_stmt = select(
-                func.count(CallLog.id),
-                func.coalesce(func.sum(CallLog.duration_seconds), 0)
-            ).where(
-                and_(
-                    CallLog.telecaller_id == user.id,
-                    CallLog.call_started_at >= today_start
-                )
-            )
-            call_res = (await self.db.execute(calls_stmt)).one()
-            calls_today_count = call_res[0] or 0
-            talk_time_secs = call_res[1] or 0
-
-            # Conversions today
-            conv_stmt = select(func.count(CallLog.id)).where(
-                and_(
-                    CallLog.telecaller_id == user.id,
-                    CallLog.disposition == CallDisposition.CONVERTED_APPOINTMENT,
-                    CallLog.call_started_at >= today_start
-                )
-            )
-            conversions_count = (await self.db.execute(conv_stmt)).scalar() or 0
+            caller_stats = stats_by_telecaller.get(user.id, {"calls": 0, "talk_time": 0, "conversions": 0})
+            calls_today_count = caller_stats["calls"]
+            talk_time_secs = caller_stats["talk_time"]
+            conversions_count = caller_stats["conversions"]
 
             # Live call duration
             call_duration = 0
@@ -606,45 +675,62 @@ class CRMService:
     async def get_telecaller_kpis(
         self,
         tenant_id: UUID,
-        branch_id: Optional[UUID] = None
+        branch_id: Optional[UUID] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None
     ) -> List[TelecallerKPIItem]:
         """
-        Computes aggregate KPI metrics per telecaller across all calls.
+        Computes aggregate KPI metrics per telecaller across all calls within date range.
+        Includes detailed outcomes: conversions, callbacks, not interested, dnd, wrong number, and skipped.
         """
-        # Fetch all users who have placed calls or have sessions
-        users_stmt = (
-            select(User)
-            .where(User.hospital_id == tenant_id)
-        )
+        # Fetch only users with telecaller sessions or existing call logs
+        t_ids = (await self.db.execute(select(TelecallerSession.user_id).where(TelecallerSession.tenant_id == tenant_id))).scalars().all()
+        c_ids = (await self.db.execute(select(CallLog.telecaller_id).where(CallLog.tenant_id == tenant_id))).scalars().all()
+        active_user_ids = list(set(t_ids + c_ids))
+        if not active_user_ids:
+            return []
+        
+        users_stmt = select(User).where(and_(User.tenant_id == tenant_id, User.id.in_(active_user_ids)))
         users = (await self.db.execute(users_stmt)).scalars().all()
         now = datetime.utcnow()
         today_start = datetime.combine(date.today(), time.min)
 
         kpis: List[TelecallerKPIItem] = []
         for user in users:
-            # Query call logs for this user
+            # Build query with optional date filters
+            call_conditions = [CallLog.telecaller_id == user.id, CallLog.tenant_id == tenant_id]
+            if date_from:
+                call_conditions.append(CallLog.created_at >= date_from)
+            if date_to:
+                call_conditions.append(CallLog.created_at <= date_to)
+
             call_metrics_stmt = select(
                 func.count(CallLog.id),
-                func.coalesce(func.sum(CallLog.duration_seconds), 0)
-            ).where(CallLog.telecaller_id == user.id)
+                func.coalesce(func.sum(CallLog.duration_seconds), 0),
+                func.coalesce(func.sum(case((CallLog.duration_seconds > 0, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((CallLog.disposition == CallDisposition.CONVERTED_APPOINTMENT, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((CallLog.disposition == CallDisposition.CALLBACK_REQUESTED, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((CallLog.disposition == CallDisposition.NOT_INTERESTED, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((CallLog.disposition == CallDisposition.DND, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((CallLog.disposition == CallDisposition.WRONG_NUMBER, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((
+                    or_(
+                        CallLog.disposition == CallDisposition.NOT_REACHABLE,
+                        CallLog.duration_seconds == 0,
+                        and_(CallLog.duration_seconds < 5, CallLog.disposition.is_(None))
+                    ), 1), else_=0)), 0)
+            ).where(and_(*call_conditions))
+
             row = (await self.db.execute(call_metrics_stmt)).one()
-            total_calls = row[0] or 0
-            total_duration = row[1] or 0
-
-            if total_calls == 0:
-                continue  # Skip users who are not telecallers
-
-            # Answered calls (duration > 0)
-            ans_stmt = select(func.count(CallLog.id)).where(
-                and_(CallLog.telecaller_id == user.id, CallLog.duration_seconds > 0)
-            )
-            answered_calls = (await self.db.execute(ans_stmt)).scalar() or 0
-
-            # Conversions
-            conv_stmt = select(func.count(CallLog.id)).where(
-                and_(CallLog.telecaller_id == user.id, CallLog.disposition == CallDisposition.CONVERTED_APPOINTMENT)
-            )
-            conversions = (await self.db.execute(conv_stmt)).scalar() or 0
+            total_calls = int(row[0] or 0)
+            total_duration = int(row[1] or 0)
+            answered_calls = int(row[2] or 0)
+            conversions = int(row[3] or 0)
+            callback_count = int(row[4] or 0)
+            not_interested_count = int(row[5] or 0)
+            dnd_invalid_count = int(row[6] or 0)
+            wrong_number_count = int(row[7] or 0)
+            skipped_count = int(row[8] or 0)
 
             # Overdue follow-ups assigned to this telecaller
             overdue_stmt = select(func.count(Lead.id)).where(
@@ -657,20 +743,26 @@ class CRMService:
             overdue_count = (await self.db.execute(overdue_stmt)).scalar() or 0
 
             avg_duration = int(total_duration / answered_calls) if answered_calls > 0 else 0
-            conversion_pct = round((conversions / answered_calls * 100), 1) if answered_calls > 0 else 0.0
+            conversion_pct = round((conversions / total_calls * 100), 1) if total_calls > 0 else 0.0
 
             kpis.append(
                 TelecallerKPIItem(
                     user_id=user.id,
                     user_name=user.full_name or user.email,
+                    email=user.email,
                     total_calls=total_calls,
                     answered_calls=answered_calls,
                     total_duration_seconds=total_duration,
                     avg_duration_seconds=avg_duration,
                     conversions=conversions,
                     conversion_rate_percentage=conversion_pct,
-                    overdue_follow_ups=overdue_count
+                    overdue_follow_ups=overdue_count,
+                    callback_count=callback_count,
+                    not_interested_count=not_interested_count,
+                    dnd_invalid_count=dnd_invalid_count,
+                    wrong_number_count=wrong_number_count,
+                    skipped_count=skipped_count
                 )
             )
 
-        return sorted(kpis, key=lambda k: k.conversions, reverse=True)
+        return sorted(kpis, key=lambda k: (k.conversions, k.total_calls), reverse=True)
