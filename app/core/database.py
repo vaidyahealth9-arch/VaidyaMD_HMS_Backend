@@ -92,6 +92,13 @@ async def init_db():
             "ALTER TABLE crm_telecaller_sessions ADD COLUMN IF NOT EXISTS is_revoked BOOLEAN DEFAULT FALSE;",
             "UPDATE cosgyn_treatments SET price = 8000.00 WHERE (LOWER(name) LIKE '%tesla%' AND LOWER(name) NOT LIKE '%jet%' AND (LOWER(name) LIKE '%single%' OR tesla_chair_sessions = 1)) AND price < 8000.00;",
             "UPDATE hospitals SET active_plugins = active_plugins || '[\"referrals\"]'::jsonb WHERE NOT (active_plugins @> '[\"referrals\"]'::jsonb);",
+            # VMD-001 - VMD-011 Schema Enhancements
+            "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS doctor_id UUID REFERENCES users(id) ON DELETE SET NULL;",
+            "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS referring_doctor VARCHAR(150);",
+            "CREATE INDEX IF NOT EXISTS ix_invoices_doctor_id ON invoices(doctor_id);",
+            "ALTER TABLE inventory_batches ADD COLUMN IF NOT EXISTS vendor_id UUID REFERENCES pharmacy_vendors(id) ON DELETE SET NULL;",
+            "ALTER TABLE inventory_batches ADD COLUMN IF NOT EXISTS vendor_name VARCHAR(150);",
+            "CREATE INDEX IF NOT EXISTS ix_inventory_batches_vendor_id ON inventory_batches(vendor_id);",
         ]
 
         for stmt in migrations:
@@ -179,6 +186,31 @@ async def init_db():
                         custom_commission_pct DOUBLE PRECISION,
                         notes TEXT,
                         is_active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    );
+                """))
+        except Exception:
+            pass
+
+        try:
+            async with conn.begin_nested():
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS pharmacy_purchase_returns (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        tenant_id UUID NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE,
+                        branch_id UUID REFERENCES branches(id) ON DELETE SET NULL,
+                        return_number VARCHAR(50) NOT NULL UNIQUE,
+                        vendor_id UUID REFERENCES pharmacy_vendors(id) ON DELETE SET NULL,
+                        vendor_name VARCHAR(150) NOT NULL,
+                        invoice_ref VARCHAR(100),
+                        return_date DATE DEFAULT CURRENT_DATE,
+                        status VARCHAR(50) DEFAULT 'Approved',
+                        reason VARCHAR(150) DEFAULT 'Near Expiry / Damaged',
+                        items JSONB DEFAULT '[]'::jsonb,
+                        total_return_amount DOUBLE PRECISION DEFAULT 0.0,
+                        notes TEXT,
+                        created_by_id UUID REFERENCES users(id),
                         created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
                         updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
                     );

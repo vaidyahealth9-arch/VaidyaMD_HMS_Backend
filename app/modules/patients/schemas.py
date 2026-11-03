@@ -91,6 +91,7 @@ class PatientUpdate(BaseModel):
     surname: Optional[str] = None
     age: Optional[int] = None
     dob: Optional[date] = None
+    gender: Optional[str] = None
     marital_status: Optional[str] = None
     phone: Optional[str] = None
     alternate_phone: Optional[str] = None
@@ -115,6 +116,37 @@ class PatientUpdate(BaseModel):
     tags: Optional[list[str]] = None
     alert_notes: Optional[list[str]] = None
     clinical_notes: Optional[list[str]] = None
+
+    @field_validator("gender", mode="before")
+    @classmethod
+    def normalize_gender(cls, v: Any) -> Optional[str]:
+        if not v:
+            return None
+        return str(v).lower()
+
+    @field_validator("treating_doctor_id", "partner_id", "branch_id", mode="before")
+    @classmethod
+    def empty_str_to_none_uuid(cls, v: Any) -> Any:
+        if v == "" or v is None or v == "undefined":
+            return None
+        return v
+
+    @field_validator("dob", mode="before")
+    @classmethod
+    def empty_str_to_none_dob(cls, v: Any) -> Any:
+        if v == "" or v is None or v == "undefined":
+            return None
+        return v
+
+    @field_validator("age", mode="before")
+    @classmethod
+    def empty_str_to_none_age(cls, v: Any) -> Any:
+        if v == "" or v is None or v == "undefined":
+            return None
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return None
 
 
 class PatientResponse(BaseModel):
@@ -147,6 +179,8 @@ class PatientResponse(BaseModel):
     referring_doctor: Optional[str] = None
     marketing_person_name: Optional[str] = None
     area: Optional[str] = None
+    treating_doctor_id: Optional[UUID] = None
+    treating_doctor_name: Optional[str] = None
     financial_type: Optional[str] = "self_pay"
     is_surrogate: Optional[bool] = False
 
@@ -192,3 +226,4 @@ class ClinicalNotesUpdate(BaseModel):
 class ConsentCreate(BaseModel):
     title: str 
     signature: str 
+
