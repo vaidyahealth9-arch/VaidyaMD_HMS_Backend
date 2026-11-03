@@ -25,7 +25,7 @@ from scripts.db.env_resolver import create_env_engine, resolve_database_url
 
 async def run_migration(env_name: str, explicit_url: str | None = None, auto_confirm: bool = False):
     resolved_url = resolve_database_url(env_name, explicit_url, auto_confirm)
-    engine = create_env_engine(resolved_url)
+    engine = create_env_engine(explicit_url=resolved_url)
 
     sql_path = Path(__file__).parent / "migrate_vmd_enhancements.sql"
     with open(sql_path, "r", encoding="utf-8") as f:

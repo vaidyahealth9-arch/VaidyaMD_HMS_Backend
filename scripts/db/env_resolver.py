@@ -41,6 +41,8 @@ def resolve_database_url(env_name: str = "local", explicit_url: str | None = Non
     """
     if explicit_url:
         url = explicit_url
+    elif env_name.startswith("postgresql://") or env_name.startswith("postgres://") or env_name.startswith("postgresql+"):
+        url = env_name
     else:
         env_lower = (env_name or "local").lower().strip()
 
@@ -50,9 +52,10 @@ def resolve_database_url(env_name: str = "local", explicit_url: str | None = Non
         elif env_lower in ["dev", "vaidya-hms-dev"]:
             url = os.environ.get("DEV_DATABASE_URL")
             if not url:
-                # Cloud SQL Proxy local port 5433
                 password = _get_gcp_secret("hms-db-password", "vaidya-hms-dev") or "vaidya_md_secret_2026"
-                url = f"postgresql+asyncpg://vaidya_md_admin:{password}@127.0.0.1:5433/vaidya_md_db"
+                host = os.environ.get("DEV_DATABASE_HOST", "34.14.172.218")
+                port = os.environ.get("DEV_DATABASE_PORT", "5432" if host != "127.0.0.1" else "5433")
+                url = f"postgresql+asyncpg://vaidya_md_admin:{password}@{host}:{port}/vaidya_md_db"
 
         elif env_lower in ["prod", "production", "vaidya-hms-prod"]:
             if not auto_confirm and sys.stdin.isatty():

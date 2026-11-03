@@ -43,6 +43,7 @@ async def list_patients(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=1000),
     search: Optional[str] = Query(None),
+    treating_doctor_id: Optional[str] = Query(None),
     branch_id: Optional[UUID] = Depends(get_branch_context),
     current_user: User = Depends(get_current_user),
     service: PatientService = Depends(get_patient_service),
@@ -55,6 +56,7 @@ async def list_patients(
         page=page,
         per_page=per_page,
         search=search,
+        treating_doctor_id=treating_doctor_id,
     )
 
 

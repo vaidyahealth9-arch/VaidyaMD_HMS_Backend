@@ -1,5 +1,5 @@
 import random
-from typing import Optional, Any
+from typing import Optional, Any, Union
 from uuid import UUID
 from datetime import datetime, date
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,10 @@ class PatientService:
 
     def build_patient_response(self, patient: Patient, partner: Optional[Patient] = None) -> PatientResponse:
         b_obj = getattr(patient, 'branch', None)
+        doc_obj = getattr(patient, 'treating_doctor', None)
+        doc_name = None
+        if doc_obj and getattr(doc_obj, 'name', None):
+            doc_name = doc_obj.name if doc_obj.name.startswith("Dr.") else f"Dr. {doc_obj.name}"
         return PatientResponse(
             id=patient.id,
             vid=patient.vid,
@@ -62,6 +66,8 @@ class PatientService:
             referring_doctor=patient.referring_doctor or patient.referred_by_name,
             marketing_person_name=patient.marketing_person_name,
             area=patient.area,
+            treating_doctor_id=patient.treating_doctor_id,
+            treating_doctor_name=doc_name,
             financial_type=patient.financial_type,
             is_surrogate=patient.is_surrogate,
             partner_id=patient.partner_id,
@@ -162,7 +168,7 @@ class PatientService:
 
     async def get_patient(self, patient_id: UUID) -> PatientResponse:
         result = await self.db.execute(
-            select(Patient).options(selectinload(Patient.branch)).where(Patient.id == patient_id)
+            select(Patient).options(selectinload(Patient.branch), selectinload(Patient.treating_doctor)).where(Patient.id == patient_id)
         )
         patient = result.scalar_one_or_none()
         if not patient:
@@ -170,10 +176,20 @@ class PatientService:
         partner = await self.db.get(Patient, patient.partner_id) if patient.partner_id else None
         return self.build_patient_response(patient, partner)
 
-    async def list_patients(self, tenant_id: UUID, branch_id: Optional[UUID] = None, page: int = 1, per_page: int = 50, search: Optional[str] = None) -> PatientListResponse:
+    async def list_patients(self, tenant_id: UUID, branch_id: Optional[UUID] = None, page: int = 1, per_page: int = 50, search: Optional[str] = None, treating_doctor_id: Optional[Union[UUID, str]] = None) -> PatientListResponse:
         query = select(Patient).where(Patient.tenant_id == tenant_id)
         if branch_id:
             query = query.where(or_(Patient.branch_id == branch_id, Patient.branch_id.is_(None)))
+        if treating_doctor_id:
+            s_val = str(treating_doctor_id).strip().lower()
+            if s_val in ["unassigned", "none", "null"]:
+                query = query.where(Patient.treating_doctor_id.is_(None))
+            else:
+                try:
+                    d_uuid = UUID(str(treating_doctor_id)) if not isinstance(treating_doctor_id, UUID) else treating_doctor_id
+                    query = query.where(Patient.treating_doctor_id == d_uuid)
+                except (ValueError, TypeError):
+                    pass
         
         if search and search.strip():
             s = f"%{search.strip()}%"
@@ -192,7 +208,7 @@ class PatientService:
         total = await self.db.scalar(count_query) or 0
         
         # Get paginated data with branch preloaded
-        query = query.options(selectinload(Patient.branch)).order_by(desc(Patient.created_at)).offset((page - 1) * per_page).limit(per_page)
+        query = query.options(selectinload(Patient.branch), selectinload(Patient.treating_doctor)).order_by(desc(Patient.created_at)).offset((page - 1) * per_page).limit(per_page)
         result = await self.db.execute(query)
         patients = result.scalars().all()
         
@@ -212,7 +228,7 @@ class PatientService:
 
     async def get_timeline(self, patient_id: UUID) -> dict:
         result = await self.db.execute(
-            select(Patient).options(selectinload(Patient.branch)).where(Patient.id == patient_id)
+            select(Patient).options(selectinload(Patient.branch), selectinload(Patient.treating_doctor)).where(Patient.id == patient_id)
         )
         patient = result.scalar_one_or_none()
         if not patient:
@@ -420,7 +436,10 @@ class PatientService:
 
         update_dict = patient_data.model_dump(exclude_unset=True)
         for field, value in update_dict.items():
-            setattr(patient, field, value)
+            if field == "gender" and value:
+                setattr(patient, field, Gender(str(value).lower()))
+            else:
+                setattr(patient, field, value)
 
         await self.db.flush()
         await self.db.refresh(patient)
