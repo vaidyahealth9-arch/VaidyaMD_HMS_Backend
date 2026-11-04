@@ -39,6 +39,9 @@ class AppointmentResponse(BaseModel):
     patient_phone: Optional[str] = None
     doctor_id: UUID
     doctor_name: Optional[str] = None
+    doctor_qualification: Optional[str] = None
+    doctor_specialization: Optional[str] = None
+    doctor_reg_number: Optional[str] = None
     department: str
     scheduled_at: datetime
     status: str
