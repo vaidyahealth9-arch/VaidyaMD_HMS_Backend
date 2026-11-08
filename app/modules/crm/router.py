@@ -11,7 +11,7 @@ from datetime import datetime, date, time, timedelta
 from typing import Optional, List, Any
 from uuid import UUID
 from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks, Query, status, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -21,7 +21,7 @@ from app.modules.crm.model import LeadStatus, LeadSource
 from app.modules.crm.schemas import (
     LeadCreate, LeadUpdate, LeadResponse, LeadListResponse,
     CallLogResponse, CallDispositionUpdate, DialerQueueItem, CRMAnalyticsResponse,
-    HeartbeatPayload, TelecallerRosterItem, TelecallerKPIItem
+    HeartbeatPayload, TelecallerRosterItem, TelecallerKPIItem, LeadImportBatchResponse
 )
 from app.modules.crm.service import CRMService
 from app.modules.crm.whisper_service import process_call_audio_transcription
@@ -117,6 +117,7 @@ async def update_lead(
 @router.post("/leads/import-csv")
 async def import_leads_csv(
     file: UploadFile = File(...),
+    duplicate_strategy: str = Form("update"),  # "update" or "skip"
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     branch_id: Optional[str] = Depends(get_branch_context)
@@ -128,8 +129,52 @@ async def import_leads_csv(
         file_content=content,
         tenant_id=current_user.hospital_id,
         branch_id=b_id,
-        creator_id=current_user.id
+        creator_id=current_user.id,
+        file_name=file.filename or "leads_import.csv",
+        duplicate_strategy=duplicate_strategy
     )
+
+
+@router.get("/leads/import-history", response_model=List[LeadImportBatchResponse])
+async def list_lead_import_history(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    service = CRMService(db)
+    return await service.list_import_batches(
+        tenant_id=current_user.hospital_id,
+        limit=limit,
+        offset=offset
+    )
+
+
+@router.get("/leads/import-history/{batch_id}/failed-csv")
+async def download_failed_import_csv(
+    batch_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    service = CRMService(db)
+    csv_content = await service.export_failed_rows_csv(
+        batch_id=batch_id,
+        tenant_id=current_user.hospital_id
+    )
+    if not csv_content:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No failure records found for this import batch."
+        )
+
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=failed_rows_{batch_id}.csv"
+        }
+    )
+
 
 
 # ----------------------------------------------------------------------------

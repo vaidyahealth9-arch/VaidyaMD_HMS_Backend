@@ -5,6 +5,7 @@ Handles Leads, CSV Ingestion, Progressive Dialing Queue, Call Logs, and Reportin
 
 import csv
 import io
+import re
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime, date, time, timedelta
@@ -13,14 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.models.user import User
 from app.modules.crm.model import (
-    Lead, CallLog, LeadStatusHistory, TelecallerSession,
+    Lead, CallLog, LeadStatusHistory, TelecallerSession, LeadImportBatch,
     LeadStatus, LeadSource, CallDisposition
 )
 from app.modules.crm.schemas import (
     LeadCreate, LeadUpdate, CallLogCreate, CallDispositionUpdate,
     CRMAnalyticsResponse, DialerQueueItem, LeadResponse,
-    HeartbeatPayload, TelecallerRosterItem, TelecallerKPIItem
+    HeartbeatPayload, TelecallerRosterItem, TelecallerKPIItem,
+    LeadImportResult, LeadImportBatchResponse, LeadImportRowError
 )
+
 from app.modules.crm.exceptions import (
     LeadNotFoundException, CallLogNotFoundException, InvalidFileFormatException,
     TelecallerSessionNotFoundException
@@ -156,72 +159,144 @@ class CRMService:
         return lead
 
     # ------------------------------------------------------------------------
-    # CSV Import Engine
+    # CSV Import Engine & Import Audit Log
     # ------------------------------------------------------------------------
+
+    @staticmethod
+    def _sanitize_phone(raw: Optional[str]) -> str:
+        if not raw:
+            return ""
+        # If multiple numbers (e.g. "9876543210 / 9988776655" or "9876543210, 9988776655") take first
+        delimiters = ['/', ',', ';', ' or ', ' / ', '|']
+        primary = str(raw).strip()
+        for d in delimiters:
+            if d in primary:
+                primary = primary.split(d)[0]
+                break
+        digits = re.sub(r"[^\d]", "", primary)
+        # Handle standard Indian prefixes: +91 (12 digits) or 0 (11 digits)
+        if len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        elif len(digits) == 11 and digits.startswith("0"):
+            digits = digits[1:]
+        return digits
+
+    @staticmethod
+    def _extract_alternate_phone(raw: Optional[str]) -> Optional[str]:
+        if not raw:
+            return None
+        delimiters = ['/', ',', ';', ' or ', ' / ', '|']
+        text = str(raw).strip()
+        for d in delimiters:
+            if d in text:
+                parts = text.split(d)
+                if len(parts) > 1:
+                    alt_digits = re.sub(r"[^\d]", "", parts[1])
+                    if len(alt_digits) == 12 and alt_digits.startswith("91"):
+                        alt_digits = alt_digits[2:]
+                    elif len(alt_digits) == 11 and alt_digits.startswith("0"):
+                        alt_digits = alt_digits[1:]
+                    if len(alt_digits) >= 6:
+                        return alt_digits
+        return None
 
     async def import_leads_csv(
         self,
         file_content: bytes,
         tenant_id: UUID,
         branch_id: Optional[UUID],
-        creator_id: Optional[UUID]
+        creator_id: Optional[UUID],
+        file_name: str = "leads_import.csv",
+        duplicate_strategy: str = "update"  # "update" or "skip"
     ) -> dict[str, Any]:
         try:
             decoded = file_content.decode("utf-8-sig")
-            reader = csv.DictReader(io.StringIO(decoded))
+            reader = list(csv.DictReader(io.StringIO(decoded)))
         except Exception:
             raise InvalidFileFormatException("Failed to parse CSV file. Ensure valid UTF-8 encoding.")
 
         imported_count = 0
+        updated_count = 0
         skipped_count = 0
-        errors = []
+        duplicate_count = 0
+        errors: List[str] = []
+        error_details: List[dict] = []
 
-        # Query existing phones in tenant to prevent duplicate calls
-        existing_phones_stmt = select(Lead.phone).where(Lead.tenant_id == tenant_id)
-        existing_res = await self.db.execute(existing_phones_stmt)
-        existing_phones = {p.strip().replace(" ", "") for p in existing_res.scalars().all() if p}
-        seen_in_batch = set()
+        # Query existing leads in tenant for matching by phone
+        existing_leads_stmt = select(Lead).where(Lead.tenant_id == tenant_id)
+        existing_res = await self.db.execute(existing_leads_stmt)
+        existing_leads = existing_res.scalars().all()
+        # Build map with sanitized phone keys
+        existing_leads_map: Dict[str, Lead] = {}
+        for l in existing_leads:
+            sanitized = self._sanitize_phone(l.phone)
+            if sanitized:
+                existing_leads_map[sanitized] = l
+
+        seen_in_batch: Dict[str, Lead] = {}
+        total_rows = len(reader)
 
         for row_idx, row in enumerate(reader, start=1):
-            if not row:
+            if not row or not any(row.values()):
                 continue
+
             normalized_row = {
                 (k.strip().lower() if isinstance(k, str) else k): (v.strip() if isinstance(v, str) else v)
                 for k, v in row.items() if k is not None
             }
-            name = (
+
+            raw_name = (
                 normalized_row.get("name")
                 or normalized_row.get("full name")
                 or normalized_row.get("patient name")
                 or normalized_row.get("lead name")
                 or normalized_row.get("patient")
+                or normalized_row.get("prospect name")
+                or ""
             )
-            phone = (
+            raw_phone = (
                 normalized_row.get("phone")
                 or normalized_row.get("mobile")
                 or normalized_row.get("contact")
                 or normalized_row.get("phone number")
                 or normalized_row.get("mobile number")
                 or normalized_row.get("contact number")
+                or ""
             )
 
-            if not name or not phone:
+            clean_phone = self._sanitize_phone(raw_phone)
+            alt_phone = (
+                normalized_row.get("alternate phone")
+                or normalized_row.get("alternate_phone")
+                or normalized_row.get("secondary phone")
+                or self._extract_alternate_phone(raw_phone)
+            )
+
+            # Ingestion Rule: We only require a phone number with at least 6 digits!
+            # If name is missing, auto-assign a smart fallback name
+            if not clean_phone or len(clean_phone) < 6:
                 skipped_count += 1
-                errors.append(f"Row {row_idx}: Missing required name or phone")
+                err_msg = f"Row {row_idx}: Missing or invalid phone number ({raw_phone or 'empty'})"
+                errors.append(err_msg)
+                error_details.append({
+                    "row": row_idx,
+                    "name": raw_name or "Unknown",
+                    "phone": raw_phone or "Missing",
+                    "reason": "Invalid or missing phone number"
+                })
                 continue
 
-            clean_phone = phone.strip().replace(" ", "")
-            if clean_phone in existing_phones or clean_phone in seen_in_batch:
-                skipped_count += 1
-                errors.append(f"Row {row_idx}: Skipped duplicate phone {clean_phone}")
-                continue
-            seen_in_batch.add(clean_phone)
+            # Fallback for missing/partial names: take partial phone digits or 'Prospect'
+            name = raw_name.strip()
+            if not name:
+                name = f"Lead {clean_phone[-4:]}" if len(clean_phone) >= 4 else "Prospect (Excel)"
 
             city = (
                 normalized_row.get("city")
                 or normalized_row.get("location")
                 or normalized_row.get("town")
                 or normalized_row.get("place")
+                or normalized_row.get("district")
             )
             email = (
                 normalized_row.get("email")
@@ -233,13 +308,14 @@ class CRMService:
                 or normalized_row.get("source campaign")
                 or normalized_row.get("campaign name")
             )
-            raw_val = (
+            raw_source = (
                 normalized_row.get("source")
                 or normalized_row.get("channel")
                 or normalized_row.get("lead source")
+                or normalized_row.get("acquisition source")
                 or "excel_import"
             )
-            source_raw = str(raw_val).lower().replace(" ", "_").replace("-", "_")
+            source_raw = str(raw_source).lower().replace(" ", "_").replace("-", "_")
 
             source_enum = LeadSource.EXCEL_IMPORT
             for s in LeadSource:
@@ -247,11 +323,47 @@ class CRMService:
                     source_enum = s
                     break
 
-            lead = Lead(
+            # Deduplication & Existing Lead Check
+            is_duplicate = clean_phone in existing_leads_map or clean_phone in seen_in_batch
+            if is_duplicate:
+                duplicate_count += 1
+                target_lead = existing_leads_map.get(clean_phone) or seen_in_batch.get(clean_phone)
+
+                if duplicate_strategy == "update" and target_lead:
+                    # Update fields if new data provided
+                    if raw_name and raw_name.strip() and target_lead.name.startswith("Lead "):
+                        target_lead.name = raw_name.strip()
+                    if campaign and not target_lead.source_campaign:
+                        target_lead.source_campaign = campaign
+                    elif campaign and target_lead.source_campaign and campaign not in target_lead.source_campaign:
+                        target_lead.source_campaign = f"{target_lead.source_campaign}, {campaign}"
+                    if city and not target_lead.city:
+                        target_lead.city = city
+                    if email and not target_lead.email:
+                        target_lead.email = email
+                    if alt_phone and not target_lead.alternate_phone:
+                        target_lead.alternate_phone = alt_phone
+                    updated_count += 1
+                    continue
+                else:
+                    skipped_count += 1
+                    err_msg = f"Row {row_idx}: Skipped duplicate phone {clean_phone}"
+                    errors.append(err_msg)
+                    error_details.append({
+                        "row": row_idx,
+                        "name": name,
+                        "phone": clean_phone,
+                        "reason": f"Duplicate phone ({clean_phone}) already registered"
+                    })
+                    continue
+
+            # New Lead Insertion
+            new_lead = Lead(
                 tenant_id=tenant_id,
                 branch_id=branch_id,
                 name=name,
-                phone=phone,
+                phone=clean_phone,
+                alternate_phone=alt_phone if alt_phone else None,
                 email=email if email else None,
                 city=city if city else None,
                 source=source_enum,
@@ -259,15 +371,106 @@ class CRMService:
                 assigned_to_id=creator_id,
                 status=LeadStatus.NEW
             )
-            self.db.add(lead)
+            self.db.add(new_lead)
+            existing_leads_map[clean_phone] = new_lead
+            seen_in_batch[clean_phone] = new_lead
             imported_count += 1
 
+        # Audit Log: Record this import batch in crm_lead_import_batches
+        status = "completed"
+        if skipped_count > 0 and imported_count == 0 and updated_count == 0:
+            status = "failed"
+        elif skipped_count > 0:
+            status = "partial"
+
+        batch = LeadImportBatch(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            imported_by_id=creator_id,
+            file_name=file_name,
+            file_size=len(file_content),
+            total_rows=total_rows,
+            imported_count=imported_count,
+            updated_count=updated_count,
+            skipped_count=skipped_count,
+            duplicate_count=duplicate_count,
+            status=status,
+            duplicate_strategy=duplicate_strategy,
+            error_details=error_details[:500]  # Cap at 500 rows for storage safety
+        )
+        self.db.add(batch)
         await self.db.commit()
+        await self.db.refresh(batch)
+
         return {
+            "batch_id": batch.id,
             "imported": imported_count,
+            "updated": updated_count,
             "skipped": skipped_count,
-            "errors": errors[:10]  # Return top 10 errors if any
+            "duplicates": duplicate_count,
+            "errors": errors[:15],
+            "error_details": error_details
         }
+
+    async def list_import_batches(
+        self,
+        tenant_id: UUID,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[LeadImportBatchResponse]:
+        stmt = (
+            select(LeadImportBatch, User.full_name.label("user_name"), User.email.label("user_email"))
+            .outerjoin(User, LeadImportBatch.imported_by_id == User.id)
+            .where(LeadImportBatch.tenant_id == tenant_id)
+            .order_by(desc(LeadImportBatch.created_at))
+            .offset(offset)
+            .limit(limit)
+        )
+        res = await self.db.execute(stmt)
+        items = []
+        for batch, user_name, user_email in res.all():
+            items.append(
+                LeadImportBatchResponse(
+                    id=batch.id,
+                    tenant_id=batch.tenant_id,
+                    branch_id=batch.branch_id,
+                    imported_by_id=batch.imported_by_id,
+                    imported_by_name=user_name or user_email or "Staff Member",
+                    file_name=batch.file_name,
+                    file_size=batch.file_size or 0,
+                    total_rows=batch.total_rows or 0,
+                    imported_count=batch.imported_count or 0,
+                    updated_count=batch.updated_count or 0,
+                    skipped_count=batch.skipped_count or 0,
+                    duplicate_count=batch.duplicate_count or 0,
+                    status=batch.status or "completed",
+                    duplicate_strategy=batch.duplicate_strategy or "update",
+                    error_details=batch.error_details or [],
+                    created_at=batch.created_at
+                )
+            )
+        return items
+
+    async def export_failed_rows_csv(self, batch_id: UUID, tenant_id: UUID) -> Optional[str]:
+        stmt = select(LeadImportBatch).where(
+            and_(LeadImportBatch.id == batch_id, LeadImportBatch.tenant_id == tenant_id)
+        )
+        batch = (await self.db.execute(stmt)).scalar_one_or_none()
+        if not batch or not batch.error_details:
+            return None
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Row #", "Patient / Prospect Name", "Phone Number", "Failure Reason"])
+        for err in batch.error_details:
+            writer.writerow([
+                err.get("row", ""),
+                err.get("name", ""),
+                err.get("phone", ""),
+                err.get("reason", "")
+            ])
+        return output.getvalue()
+
 
     # ------------------------------------------------------------------------
     # Progressive Dialer Queue
