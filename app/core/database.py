@@ -55,6 +55,31 @@ async def init_db():
                     pass
     except Exception:
         pass
+        try:
+            async with conn.begin_nested():
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS crm_lead_import_batches (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        tenant_id UUID NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE,
+                        branch_id UUID REFERENCES branches(id) ON DELETE SET NULL,
+                        imported_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                        file_name VARCHAR(255) NOT NULL,
+                        file_size INTEGER DEFAULT 0,
+                        total_rows INTEGER DEFAULT 0,
+                        imported_count INTEGER DEFAULT 0,
+                        updated_count INTEGER DEFAULT 0,
+                        skipped_count INTEGER DEFAULT 0,
+                        duplicate_count INTEGER DEFAULT 0,
+                        status VARCHAR(50) DEFAULT 'completed',
+                        duplicate_strategy VARCHAR(50) DEFAULT 'update',
+                        error_details JSONB DEFAULT '[]'::jsonb,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_crm_lead_import_batches_tenant ON crm_lead_import_batches(tenant_id, created_at DESC);
+                """))
+        except Exception:
+            pass
+
 
     # 2. Synchronize tables and columns within transaction, protected by savepoints
     async with engine.begin() as conn:
@@ -99,6 +124,22 @@ async def init_db():
             "ALTER TABLE inventory_batches ADD COLUMN IF NOT EXISTS vendor_id UUID REFERENCES pharmacy_vendors(id) ON DELETE SET NULL;",
             "ALTER TABLE inventory_batches ADD COLUMN IF NOT EXISTS vendor_name VARCHAR(150);",
             "CREATE INDEX IF NOT EXISTS ix_inventory_batches_vendor_id ON inventory_batches(vendor_id);",
+            # IPD Inpatient Workflow Extensions
+            "ALTER TABLE ipd_admissions ADD COLUMN IF NOT EXISTS allergies JSONB DEFAULT '[]'::jsonb;",
+            "ALTER TABLE ipd_admissions ADD COLUMN IF NOT EXISTS risk_factors JSONB DEFAULT '{\"fall_risk\": false, \"npo\": false, \"dvt_risk\": false}'::jsonb;",
+            "ALTER TABLE ipd_admissions ADD COLUMN IF NOT EXISTS discharge_summary JSONB DEFAULT '{}'::jsonb;",
+            "ALTER TABLE ipd_admissions ADD COLUMN IF NOT EXISTS advance_amount DOUBLE PRECISION DEFAULT 0.0;",
+            "ALTER TABLE wards ADD COLUMN IF NOT EXISTS nursing_charge_per_day DOUBLE PRECISION DEFAULT 500.0;",
+            "ALTER TABLE wards ADD COLUMN IF NOT EXISTS diet_charge_per_day DOUBLE PRECISION DEFAULT 300.0;",
+            "ALTER TABLE ipd_admissions ADD COLUMN IF NOT EXISTS attending_doctor_charge_per_day DOUBLE PRECISION DEFAULT 500.0;",
+            "ALTER TABLE ipd_admissions ADD COLUMN IF NOT EXISTS daily_diet_enabled BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE ipd_admissions ADD COLUMN IF NOT EXISTS credit_limit DOUBLE PRECISION DEFAULT 20000.0;",
+            "ALTER TABLE ipd_orders ADD COLUMN IF NOT EXISTS ordered_by_id UUID REFERENCES users(id);",
+            "ALTER TABLE ipd_orders ADD COLUMN IF NOT EXISTS administered_logs JSONB DEFAULT '[]'::jsonb;",
+            "ALTER TABLE ipd_bill_items ADD COLUMN IF NOT EXISTS is_billed BOOLEAN DEFAULT FALSE;",
+            "ALTER TABLE ipd_bill_items ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'unbilled';",
+            "ALTER TABLE ipd_bill_items ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL;",
+            "ALTER TABLE ipd_bill_items ADD COLUMN IF NOT EXISTS billed_at TIMESTAMP WITHOUT TIME ZONE;",
         ]
 
         for stmt in migrations:
@@ -239,5 +280,56 @@ async def init_db():
                 """))
         except Exception:
             pass
+        try:
+            async with conn.begin_nested():
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS ipd_bill_items (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        tenant_id UUID NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE,
+                        branch_id UUID REFERENCES branches(id) ON DELETE SET NULL,
+                        admission_id UUID NOT NULL REFERENCES ipd_admissions(id) ON DELETE CASCADE,
+                        item_type VARCHAR(50) NOT NULL,
+                        category VARCHAR(100) DEFAULT 'General',
+                        service_code VARCHAR(50),
+                        item_name VARCHAR(255) NOT NULL,
+                        quantity DOUBLE PRECISION DEFAULT 1.0,
+                        unit_price DOUBLE PRECISION DEFAULT 0.0,
+                        total_price DOUBLE PRECISION DEFAULT 0.0,
+                        is_automated BOOLEAN DEFAULT FALSE,
+                        billing_date TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                        source_module VARCHAR(50) DEFAULT 'ipd',
+                        source_reference_id UUID,
+                        created_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                        notes TEXT,
+                        is_billed BOOLEAN DEFAULT FALSE,
+                        status VARCHAR(50) DEFAULT 'unbilled',
+                        invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL,
+                        billed_at TIMESTAMP WITHOUT TIME ZONE,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_ipd_bill_items_adm ON ipd_bill_items(admission_id, billing_date DESC);
+                    CREATE INDEX IF NOT EXISTS ix_ipd_bill_items_tenant ON ipd_bill_items(tenant_id);
 
+                    CREATE TABLE IF NOT EXISTS ipd_payments (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        tenant_id UUID NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE,
+                        branch_id UUID REFERENCES branches(id) ON DELETE SET NULL,
+                        admission_id UUID NOT NULL REFERENCES ipd_admissions(id) ON DELETE CASCADE,
+                        receipt_number VARCHAR(50) UNIQUE NOT NULL,
+                        amount DOUBLE PRECISION NOT NULL,
+                        payment_method VARCHAR(50) DEFAULT 'cash',
+                        transaction_reference VARCHAR(100),
+                        payment_date TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                        payment_type VARCHAR(50) DEFAULT 'advance',
+                        notes TEXT,
+                        collected_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                        invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_ipd_payments_adm ON ipd_payments(admission_id);
+                    CREATE INDEX IF NOT EXISTS ix_ipd_payments_tenant ON ipd_payments(tenant_id);
+                """))
+        except Exception:
+            pass
 

@@ -189,3 +189,46 @@ class TelecallerKPIItem(BaseModel):
     dnd_invalid_count: int = 0
     wrong_number_count: int = 0
     skipped_count: int = 0
+
+
+# ============================================================================
+# Lead Import & Batch History Schemas
+# ============================================================================
+
+class LeadImportRowError(BaseModel):
+    row: int
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    reason: str
+
+
+class LeadImportResult(BaseModel):
+    batch_id: Optional[UUID] = None
+    imported: int
+    updated: int = 0
+    skipped: int = 0
+    duplicates: int = 0
+    errors: List[str] = Field(default_factory=list)
+    error_details: List[LeadImportRowError] = Field(default_factory=list)
+
+
+class LeadImportBatchResponse(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    branch_id: Optional[UUID] = None
+    imported_by_id: Optional[UUID] = None
+    imported_by_name: Optional[str] = None
+    file_name: str
+    file_size: int = 0
+    total_rows: int = 0
+    imported_count: int = 0
+    updated_count: int = 0
+    skipped_count: int = 0
+    duplicate_count: int = 0
+    status: str
+    duplicate_strategy: str
+    error_details: List[dict] = Field(default_factory=list)
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+

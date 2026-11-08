@@ -168,3 +168,28 @@ class TelecallerSession(Base):
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
     current_lead = relationship("Lead", foreign_keys=[current_lead_id])
+
+
+class LeadImportBatch(Base):
+    __tablename__ = "crm_lead_import_batches"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True, index=True)
+    imported_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
+
+    file_name = Column(String(255), nullable=False)
+    file_size = Column(Integer, default=0)
+    total_rows = Column(Integer, default=0)
+    imported_count = Column(Integer, default=0)
+    updated_count = Column(Integer, default=0)
+    skipped_count = Column(Integer, default=0)
+    duplicate_count = Column(Integer, default=0)
+    status = Column(String(50), default="completed", index=True)  # completed, partial, failed
+    duplicate_strategy = Column(String(50), default="update")     # update, skip
+
+    error_details = Column(JSONB, default=list, comment="List of skipped rows and reasons")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    imported_by = relationship("User", foreign_keys=[imported_by_id])
+

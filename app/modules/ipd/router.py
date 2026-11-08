@@ -11,19 +11,24 @@ from app.core.dependencies import get_current_user, require_active_plugin
 from app.modules.ipd.service import IPDService
 from app.modules.ipd.schemas import (
     WardCreate, WardUpdate, BedCreate, BedUpdate, BedStatusUpdate,
-    AdmissionCreate, DischargeRequest, TransferBedRequest,
-    NursingTaskCreate, NursingTaskComplete
+    AdmissionCreate, AdmissionUpdate, DischargeRequest, TransferBedRequest,
+    DischargeSummarySave, NursingTaskCreate, NursingTaskComplete,
+    RoundNoteCreate, OrderCreate, OrderStatusUpdate, OrderAdministerPayload,
+    FluidBalanceCreate, BillItemCreate, PaymentCreate, SettleBillItemsRequest
 )
 
 router = APIRouter(
     prefix="/ipd",
-    tags=["IPD (Clean Architecture)"],
+    tags=["IPD (Inpatient Department)"],
     dependencies=[Depends(get_current_user), Depends(require_active_plugin("ipd"))],
 )
 
 def get_ipd_service(db: AsyncSession = Depends(get_db)) -> IPDService:
     return IPDService(db)
 
+# -----------------------------------------------------------------------------
+# WARDS
+# -----------------------------------------------------------------------------
 @router.get("/wards")
 @router.get("/wards/")
 async def list_wards(
@@ -65,6 +70,9 @@ async def delete_ward(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+# -----------------------------------------------------------------------------
+# BEDS
+# -----------------------------------------------------------------------------
 @router.get("/beds")
 @router.get("/beds/")
 async def list_beds(
@@ -123,6 +131,9 @@ async def update_bed_status(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+# -----------------------------------------------------------------------------
+# ADMISSIONS
+# -----------------------------------------------------------------------------
 @router.get("/admissions")
 @router.get("/admissions/")
 async def list_admissions(
@@ -148,28 +159,28 @@ async def admit_patient(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/admissions/{admission_id}/discharge-summary")
-@router.get("/admissions/{admission_id}/discharge-summary/")
-async def get_discharge_summary(
+@router.get("/admissions/{admission_id}")
+@router.get("/admissions/{admission_id}/")
+async def get_admission_details(
     admission_id: UUID,
     current_user: User = Depends(get_current_user),
     service: IPDService = Depends(get_ipd_service),
 ):
     try:
-        return await service.calculate_discharge_summary(admission_id)
+        return await service.get_admission_details(admission_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-@router.post("/admissions/{admission_id}/discharge")
-@router.post("/admissions/{admission_id}/discharge/")
-async def discharge_patient(
+@router.patch("/admissions/{admission_id}")
+@router.put("/admissions/{admission_id}")
+async def update_admission(
     admission_id: UUID,
-    payload: DischargeRequest,
+    payload: AdmissionUpdate,
     current_user: User = Depends(get_current_user),
     service: IPDService = Depends(get_ipd_service),
 ):
     try:
-        return await service.discharge_patient(admission_id, payload)
+        return await service.update_admission(admission_id, payload)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -186,6 +197,140 @@ async def transfer_bed(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.get("/admissions/{admission_id}/discharge-summary")
+@router.get("/admissions/{admission_id}/discharge-summary/")
+async def get_discharge_summary(
+    admission_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.calculate_discharge_summary(admission_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.post("/admissions/{admission_id}/save-discharge-summary")
+@router.post("/admissions/{admission_id}/save-discharge-summary/")
+async def save_discharge_summary(
+    admission_id: UUID,
+    payload: DischargeSummarySave,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.save_discharge_summary(admission_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.post("/admissions/{admission_id}/discharge")
+@router.post("/admissions/{admission_id}/discharge/")
+async def discharge_patient(
+    admission_id: UUID,
+    payload: DischargeRequest,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.discharge_patient(admission_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+# -----------------------------------------------------------------------------
+# DOCTOR ROUND NOTES (SOAP)
+# -----------------------------------------------------------------------------
+@router.get("/admissions/{admission_id}/round-notes")
+async def list_round_notes(
+    admission_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    return await service.list_round_notes(admission_id)
+
+@router.post("/admissions/{admission_id}/round-notes", status_code=status.HTTP_201_CREATED)
+async def add_round_note(
+    admission_id: UUID,
+    payload: RoundNoteCreate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.add_round_note(admission_id, payload, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# -----------------------------------------------------------------------------
+# BEDSIDE ORDERS & eMAR
+# -----------------------------------------------------------------------------
+@router.get("/admissions/{admission_id}/orders")
+async def list_orders(
+    admission_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    return await service.list_orders(admission_id)
+
+@router.post("/admissions/{admission_id}/orders", status_code=status.HTTP_201_CREATED)
+async def create_order(
+    admission_id: UUID,
+    payload: OrderCreate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.create_order(admission_id, payload, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.patch("/orders/{order_id}/status")
+async def update_order_status(
+    order_id: UUID,
+    payload: OrderStatusUpdate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.update_order_status(order_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.post("/orders/{order_id}/administer")
+async def administer_order(
+    order_id: UUID,
+    payload: OrderAdministerPayload,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.administer_order(order_id, payload, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+# -----------------------------------------------------------------------------
+# FLUID BALANCE (INTAKE / OUTPUT)
+# -----------------------------------------------------------------------------
+@router.get("/admissions/{admission_id}/fluid-balance")
+async def list_fluid_balances(
+    admission_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    return await service.list_fluid_balances(admission_id)
+
+@router.post("/admissions/{admission_id}/fluid-balance", status_code=status.HTTP_201_CREATED)
+async def add_fluid_balance(
+    admission_id: UUID,
+    payload: FluidBalanceCreate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.add_fluid_balance(admission_id, payload, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# -----------------------------------------------------------------------------
+# NURSING TASKS & VITALS
+# -----------------------------------------------------------------------------
 @router.get("/nursing-tasks")
 @router.get("/nursing-tasks/")
 async def list_nursing_tasks(
@@ -235,6 +380,9 @@ async def complete_nursing_task(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+# -----------------------------------------------------------------------------
+# NIGHTLY CHARGES ACCRUAL
+# -----------------------------------------------------------------------------
 @router.post("/accrue-daily-charges")
 @router.post("/accrue-daily-charges/")
 async def accrue_daily_charges(
@@ -243,3 +391,89 @@ async def accrue_daily_charges(
 ):
     return await service.accrue_daily_charges(tenant_id=current_user.tenant_id)
 
+# -----------------------------------------------------------------------------
+# ROLLING BILL & PAYMENTS
+# -----------------------------------------------------------------------------
+@router.get("/admissions/{admission_id}/rolling-bill")
+@router.get("/admissions/{admission_id}/rolling-bill/")
+async def get_rolling_bill(
+    admission_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.get_rolling_bill_summary(admission_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.get("/admissions/{admission_id}/bill-items")
+@router.get("/admissions/{admission_id}/bill-items/")
+async def list_bill_items(
+    admission_id: UUID,
+    item_type: Optional[str] = None,
+    category: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    return await service.list_bill_items(admission_id, item_type=item_type, category=category)
+
+@router.post("/admissions/{admission_id}/bill-items", status_code=status.HTTP_201_CREATED)
+@router.post("/admissions/{admission_id}/bill-items/", status_code=status.HTTP_201_CREATED)
+async def post_bill_item(
+    admission_id: UUID,
+    payload: BillItemCreate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.post_bill_item(admission_id, payload, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.delete("/bill-items/{item_id}")
+@router.delete("/bill-items/{item_id}/")
+async def delete_bill_item(
+    item_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.delete_bill_item(item_id, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.get("/admissions/{admission_id}/payments")
+@router.get("/admissions/{admission_id}/payments/")
+async def list_admission_payments(
+    admission_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    return await service.list_payments(admission_id)
+
+@router.post("/admissions/{admission_id}/payments", status_code=status.HTTP_201_CREATED)
+@router.post("/admissions/{admission_id}/payments/", status_code=status.HTTP_201_CREATED)
+async def post_advance_payment(
+    admission_id: UUID,
+    payload: PaymentCreate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.post_advance_payment(admission_id, payload, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/admissions/{admission_id}/settle-invoice")
+@router.post("/admissions/{admission_id}/settle-invoice/")
+async def settle_invoice(
+    admission_id: UUID,
+    payload: SettleBillItemsRequest,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.settle_bill_items(admission_id, payload, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

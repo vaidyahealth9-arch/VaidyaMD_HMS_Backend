@@ -22,7 +22,7 @@ from app.modules.ipd.model import Ward, Bed, IPDAdmission, NursingTask
 from app.modules.pharmacy.model import PharmacyIndent, PurchaseOrder, GoodsReceivedNote, InventoryBatch, PharmacyVendor, PharmacyPurchaseReturn
 from app.modules.counseling.models import CounselingNote
 from app.modules.auth.models import RefreshToken
-from app.modules.crm.model import Lead, CallLog, LeadStatusHistory, TelecallerSession, LeadStatus, LeadSource, CallDisposition
+from app.modules.crm.model import Lead, CallLog, LeadStatusHistory, TelecallerSession, LeadImportBatch, LeadStatus, LeadSource, CallDisposition
 
 # Specialty Plugins (Plug-and-Play Verticals)
 from app.plugins.fertility.models import (
@@ -58,7 +58,7 @@ __all__ = [
     "CounselingNote",
     "RefreshToken",
     # CRM & Telecaller
-    "Lead", "CallLog", "LeadStatusHistory", "TelecallerSession", "LeadStatus", "LeadSource", "CallDisposition",
+    "Lead", "CallLog", "LeadStatusHistory", "TelecallerSession", "LeadImportBatch", "LeadStatus", "LeadSource", "CallDisposition",
     # Fertility Plugin
     "TreatmentCycle", "TreatmentCycleStatus",
     "TreatmentCycleType",
