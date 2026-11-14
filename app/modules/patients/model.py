@@ -94,10 +94,10 @@ class Patient(Base):
 
     # Relationships
     hospital = relationship("Hospital", back_populates="patients")
-    branch = relationship("Branch", back_populates="patients")
-    partner = relationship("Patient", remote_side=[id], uselist=False)
-    treating_doctor = relationship("User", foreign_keys=[treating_doctor_id])
-    marketing_person = relationship("User", foreign_keys=[marketing_person_id])
+    branch = relationship("Branch", back_populates="patients", lazy="selectin")
+    partner = relationship("Patient", remote_side=[id], uselist=False, lazy="selectin")
+    treating_doctor = relationship("User", foreign_keys=[treating_doctor_id], lazy="selectin")
+    marketing_person = relationship("User", foreign_keys=[marketing_person_id], lazy="selectin")
 
     clinical_records = relationship("ClinicalRecord", back_populates="patient", lazy="selectin")
     appointments = relationship("Appointment", back_populates="patient", lazy="selectin")

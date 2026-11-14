@@ -171,6 +171,18 @@ class AppointmentService:
             else:
                 visit_label = raw_vt.replace("visit_", "").replace("_", " ").title()
 
+            is_couple = bool(meta.get("is_couple_visit"))
+            partner_name = meta.get("partner_name") or ""
+
+            if is_couple and partner_name:
+                item_desc = f"Couple Consultation: {visit_label} ({patient.name} & {partner_name})"
+                reason_text = f"OPD Couple Consultation: {visit_label} - {doctor.name}"
+                inv_notes = f"Consolidated couple OPD consultation for {patient.name} ({patient.vid}) and spouse {partner_name}"
+            else:
+                item_desc = f"{visit_label} - {doctor.name}"
+                reason_text = f"OPD: {visit_label} - {doctor.name}"
+                inv_notes = f"Generated upon appointment booking for {patient.name}"
+
             billing_service = BillingService(self.db)
             pay_method = data.payment_method or ("cash" if paid > Decimal("0") else "pending")
             invoice_create = InvoiceCreate(
@@ -178,10 +190,10 @@ class AppointmentService:
                 appointment_source="OP",
                 source_module="opd",
                 source_reference_id=appointment.id,
-                reason_for_attendance=f"OPD: {visit_label} - {doctor.name}",
+                reason_for_attendance=reason_text,
                 items=[
                     InvoiceItem(
-                        description=f"{visit_label} - {doctor.name}",
+                        description=item_desc,
                         quantity=1,
                         unit_price=fee,
                         total=fee,
@@ -194,7 +206,7 @@ class AppointmentService:
                 upi_pay_mode=data.upi_pay_mode,
                 created_by=data.doctor_id,
                 branch_id=branch_id,
-                notes=f"Generated upon appointment booking for {patient.name}"
+                notes=inv_notes
             )
             created_inv = await billing_service.create_invoice(invoice_create, tenant_id=tenant_id)
             appointment.invoice_id = created_inv.id

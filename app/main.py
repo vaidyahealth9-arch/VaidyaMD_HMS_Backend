@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from app.config import settings
@@ -253,6 +253,10 @@ async def serve_uploaded_file(file_path: str):
                 return FileResponse(local_file)
         except Exception as e:
             logger.error(f"Error fetching '{clean_relative}' from GCS: {e}")
+            return RedirectResponse(
+                f"https://storage.googleapis.com/{settings.GCS_BUCKET_NAME}/{clean_relative}",
+                status_code=307,
+            )
 
     raise HTTPException(status_code=404, detail="File not found")
 
@@ -260,6 +264,7 @@ async def serve_uploaded_file(file_path: str):
 # --- WebSocket Endpoint ---
 @app.websocket("/ws/notifications/{user_id}")
 @app.websocket("/api/ws/notifications/{user_id}")
+@app.websocket("/ws/ws/notifications/{user_id}")
 async def websocket_notifications(websocket: WebSocket, user_id: str):
     """
     Real-time notification channel per user.

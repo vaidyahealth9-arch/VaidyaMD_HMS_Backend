@@ -12,7 +12,7 @@ from app.modules.ipd.service import IPDService
 from app.modules.ipd.schemas import (
     WardCreate, WardUpdate, BedCreate, BedUpdate, BedStatusUpdate,
     AdmissionCreate, AdmissionUpdate, DischargeRequest, TransferBedRequest,
-    DischargeSummarySave, NursingTaskCreate, NursingTaskComplete,
+    DischargeSummarySave, NursingTaskCreate, NursingTaskComplete, NursingTaskReschedule, VitalsFrequencyUpdate,
     RoundNoteCreate, OrderCreate, OrderStatusUpdate, OrderAdministerPayload,
     FluidBalanceCreate, BillItemCreate, PaymentCreate, SettleBillItemsRequest
 )
@@ -374,6 +374,41 @@ async def complete_nursing_task(
     try:
         return await service.complete_nursing_task(
             task_id,
+            payload,
+            user_id=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+# -----------------------------------------------------------------------------
+@router.patch("/nursing-tasks/{task_id}/reschedule")
+@router.post("/nursing-tasks/{task_id}/reschedule")
+async def reschedule_nursing_task(
+    task_id: UUID,
+    payload: NursingTaskReschedule,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.reschedule_nursing_task(
+            task_id,
+            payload,
+            user_id=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.patch("/admissions/{admission_id}/vitals-frequency")
+@router.post("/admissions/{admission_id}/vitals-frequency")
+async def update_admission_vitals_frequency(
+    admission_id: UUID,
+    payload: VitalsFrequencyUpdate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.update_admission_vitals_frequency(
+            admission_id,
             payload,
             user_id=current_user.id,
         )

@@ -1,3 +1,5 @@
+import re
+from datetime import timedelta
 import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -15,10 +17,51 @@ from app.modules.ipd.model import (
 from app.modules.ipd.schemas import (
     WardCreate, WardUpdate, BedCreate, BedUpdate, BedStatusUpdate,
     AdmissionCreate, AdmissionUpdate, DischargeRequest, TransferBedRequest,
-    DischargeSummarySave, NursingTaskCreate, NursingTaskComplete,
+    DischargeSummarySave, NursingTaskCreate, NursingTaskComplete, NursingTaskReschedule, VitalsFrequencyUpdate,
     RoundNoteCreate, OrderCreate, OrderStatusUpdate, OrderAdministerPayload,
     FluidBalanceCreate, BillItemCreate, PaymentCreate, SettleBillItemsRequest
 )
+
+def calculate_next_scheduled_time(base_time: datetime, frequency: str) -> Optional[datetime]:
+    if not frequency:
+        return None
+    freq = frequency.upper().strip()
+    if freq in ("STAT", "PRN", "ONCE", "AS NEEDED"):
+        return None
+    if freq in ("OD", "DAILY", "Q24H"):
+        return base_time + timedelta(hours=24)
+    if freq in ("BD", "BID", "Q12H"):
+        return base_time + timedelta(hours=12)
+    if freq in ("TID", "Q8H"):
+        return base_time + timedelta(hours=8)
+    if freq in ("QID", "Q6H"):
+        return base_time + timedelta(hours=6)
+    
+    match = re.match(r"^Q?(\d+)\s*H(?:OURS?)?$", freq)
+    if match:
+        hours = int(match.group(1))
+        if hours > 0:
+            return base_time + timedelta(hours=hours)
+            
+    match_min = re.match(r"^Q?(\d+)\s*M(?:IN(?:UTES?)?)?$", freq)
+    if match_min:
+        mins = int(match_min.group(1))
+        if mins > 0:
+            return base_time + timedelta(minutes=mins)
+            
+    if "4H" in freq:
+        return base_time + timedelta(hours=4)
+    if "2H" in freq:
+        return base_time + timedelta(hours=2)
+    if "1H" in freq:
+        return base_time + timedelta(hours=1)
+    if "6H" in freq:
+        return base_time + timedelta(hours=6)
+    if "8H" in freq:
+        return base_time + timedelta(hours=8)
+    if "12H" in freq:
+        return base_time + timedelta(hours=12)
+    return None
 
 class IPDService:
     def __init__(self, db: AsyncSession):
@@ -261,7 +304,7 @@ class IPDService:
             bed_id=bed.id,
             task_type="Vitals",
             description="Baseline Vitals & SpO2 Monitoring",
-            frequency="Q4H",
+            frequency=getattr(payload, "vitals_frequency", None) or "Q4H",
             status="Pending",
         )
         task2 = NursingTask(
@@ -844,6 +887,26 @@ class IPDService:
             task.vitals_payload = payload.vitals_payload
         if payload.notes:
             task.notes = f"{task.notes or ''}\n{payload.notes}".strip()
+
+        # Auto-recurrence: if this is a recurring vitals task and admission is active, schedule next check
+        if (task.task_type or "").lower() == "vitals" and task.frequency:
+            next_time = calculate_next_scheduled_time(task.completed_at or get_now_ist_naive(), task.frequency)
+            if next_time:
+                adm = await self.db.get(IPDAdmission, task.admission_id)
+                if adm and (adm.status or "").lower() == "active":
+                    next_task = NursingTask(
+                        tenant_id=task.tenant_id,
+                        branch_id=task.branch_id,
+                        admission_id=task.admission_id,
+                        bed_id=task.bed_id,
+                        task_type="Vitals",
+                        description=task.description or "Baseline Vitals & SpO2 Monitoring",
+                        frequency=task.frequency,
+                        scheduled_time=next_time,
+                        status="Pending",
+                    )
+                    self.db.add(next_task)
+
         await self.db.flush()
         return {
             "message": "Nursing task marked as completed",
@@ -852,6 +915,92 @@ class IPDService:
         }
 
     # -------------------------------------------------------------------------
+    async def reschedule_nursing_task(
+        self,
+        task_id: UUID,
+        payload: NursingTaskReschedule,
+        user_id: Optional[UUID] = None,
+    ):
+        task = await self.db.get(NursingTask, task_id)
+        if not task:
+            raise ValueError("Nursing task not found")
+
+        if payload.frequency:
+            task.frequency = payload.frequency.strip()
+        if payload.scheduled_time:
+            task.scheduled_time = payload.scheduled_time
+        elif payload.frequency:
+            next_time = calculate_next_scheduled_time(get_now_ist_naive(), payload.frequency)
+            if next_time:
+                task.scheduled_time = next_time
+
+        if payload.notes:
+            task.notes = f"{task.notes or ''}\n[Schedule Updated]: {payload.notes}".strip()
+
+        await self.db.flush()
+        await self.db.refresh(task)
+        return {
+            "message": "Nursing task schedule updated successfully",
+            "task_id": str(task.id),
+            "frequency": task.frequency,
+            "scheduled_time": to_ist_iso(task.scheduled_time) if task.scheduled_time else None,
+        }
+
+    async def update_admission_vitals_frequency(
+        self,
+        admission_id: UUID,
+        payload: VitalsFrequencyUpdate,
+        user_id: Optional[UUID] = None,
+    ):
+        adm = await self.db.get(IPDAdmission, admission_id)
+        if not adm:
+            raise ValueError("Admission not found")
+
+        q = select(NursingTask).where(
+            NursingTask.admission_id == admission_id,
+            NursingTask.task_type.ilike("%vital%"),
+            NursingTask.status == "Pending",
+        ).order_by(NursingTask.scheduled_time.asc())
+        res = await self.db.execute(q)
+        pending_task = res.scalars().first()
+
+        next_time = payload.scheduled_time
+        if not next_time and payload.frequency:
+            next_time = calculate_next_scheduled_time(get_now_ist_naive(), payload.frequency)
+
+        if pending_task:
+            pending_task.frequency = payload.frequency
+            if next_time:
+                pending_task.scheduled_time = next_time
+            if payload.notes:
+                pending_task.notes = f"{pending_task.notes or ''}\n[Frequency Change]: {payload.notes}".strip()
+            task_id = str(pending_task.id)
+        else:
+            new_task = NursingTask(
+                tenant_id=adm.tenant_id,
+                branch_id=adm.branch_id,
+                admission_id=adm.id,
+                bed_id=adm.bed_id,
+                task_type="Vitals",
+                description="Baseline Vitals & SpO2 Monitoring",
+                frequency=payload.frequency,
+                scheduled_time=next_time or get_now_ist_naive(),
+                status="Pending",
+                notes=f"[Frequency Configured]: {payload.notes}" if payload.notes else None,
+            )
+            self.db.add(new_task)
+            await self.db.flush()
+            task_id = str(new_task.id)
+
+        await self.db.flush()
+        return {
+            "message": f"Vitals schedule updated to {payload.frequency}",
+            "admission_id": str(admission_id),
+            "task_id": task_id,
+            "frequency": payload.frequency,
+            "scheduled_time": to_ist_iso(next_time) if next_time else None,
+        }
+
     # DISCHARGE & BILLING CONSOLIDATION
     # -------------------------------------------------------------------------
     async def save_discharge_summary(self, admission_id: UUID, payload: DischargeSummarySave):
