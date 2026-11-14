@@ -12,5 +12,6 @@ aiofiles==24.1.0
 websockets==13.0
 passlib[bcrypt]==1.7.4
 hl7==0.4.5
+google-cloud-storage>=2.14.0
 # Speech-to-text transcription engine (Faster-Whisper / CTranslate2)
 faster-whisper>=1.0.0

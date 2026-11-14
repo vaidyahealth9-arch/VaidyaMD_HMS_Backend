@@ -50,6 +50,7 @@ class AdmissionCreate(BaseModel):
     allergies: Optional[List[str]] = None
     risk_factors: Optional[Dict[str, Any]] = None
     advance_amount: Optional[float] = 0.0
+    vitals_frequency: Optional[str] = "Q4H"
 
 class AdmissionUpdate(BaseModel):
     admitting_doctor_id: Optional[UUID] = None
@@ -90,6 +91,16 @@ class NursingTaskCreate(BaseModel):
     description: str
     frequency: str = "Q4H"
     scheduled_time: Optional[datetime] = None
+
+class NursingTaskReschedule(BaseModel):
+    frequency: Optional[str] = None
+    scheduled_time: Optional[datetime] = None
+    notes: Optional[str] = None
+
+class VitalsFrequencyUpdate(BaseModel):
+    frequency: str
+    scheduled_time: Optional[datetime] = None
+    notes: Optional[str] = None
 
 class NursingTaskComplete(BaseModel):
     completed_by_id: Optional[UUID] = None

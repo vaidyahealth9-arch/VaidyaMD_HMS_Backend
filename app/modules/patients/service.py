@@ -31,8 +31,14 @@ class PatientService:
         return f"VH-{code}-{base_num:07d}-{random.randint(100, 999)}"
 
     def build_patient_response(self, patient: Patient, partner: Optional[Patient] = None) -> PatientResponse:
-        b_obj = getattr(patient, 'branch', None)
-        doc_obj = getattr(patient, 'treating_doctor', None)
+        try:
+            b_obj = getattr(patient, 'branch', None)
+        except Exception:
+            b_obj = None
+        try:
+            doc_obj = getattr(patient, 'treating_doctor', None)
+        except Exception:
+            doc_obj = None
         doc_name = None
         if doc_obj and getattr(doc_obj, 'name', None):
             doc_name = doc_obj.name if doc_obj.name.startswith("Dr.") else f"Dr. {doc_obj.name}"
@@ -394,10 +400,22 @@ class PatientService:
         }
         
     async def get_couple_profile(self, patient_id: UUID):
-        patient = await self.db.get(Patient, patient_id)
+        result = await self.db.execute(
+            select(Patient)
+            .options(selectinload(Patient.branch), selectinload(Patient.treating_doctor))
+            .where(Patient.id == patient_id)
+        )
+        patient = result.scalar_one_or_none()
         if not patient:
             raise PatientNotFoundError()
-        partner = await self.db.get(Patient, patient.partner_id) if patient.partner_id else None
+        partner = None
+        if patient.partner_id:
+            res_partner = await self.db.execute(
+                select(Patient)
+                .options(selectinload(Patient.branch), selectinload(Patient.treating_doctor))
+                .where(Patient.id == patient.partner_id)
+            )
+            partner = res_partner.scalar_one_or_none()
         return {
             "primary_patient": self.build_patient_response(patient, partner),
             "partner": self.build_patient_response(partner, patient) if partner else None,
