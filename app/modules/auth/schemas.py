@@ -18,6 +18,7 @@ class UserResponse(BaseModel):
     reg_number: Optional[str] = None
     avatar_url: Optional[str] = None
     phone: Optional[str] = None
+    consultation_fee: Optional[float] = 500.0
     tenant_id: UUID
     branch_id: Optional[UUID] = None
     hospital_name: Optional[str] = None
@@ -43,6 +44,7 @@ class UserCreateRequest(BaseModel):
     qualification: Optional[str] = None
     reg_number: Optional[str] = None
     phone: Optional[str] = None
+    consultation_fee: Optional[float] = 500.0
     branch_id: Optional[UUID] = None
     permission_profile_id: Optional[UUID] = None
 
@@ -57,6 +59,7 @@ class AdminUserUpdateRequest(BaseModel):
     qualification: Optional[str] = None
     reg_number: Optional[str] = None
     phone: Optional[str] = None
+    consultation_fee: Optional[float] = 500.0
     branch_id: Optional[UUID] = None
     permission_profile_id: Optional[UUID] = None
     is_active: Optional[bool] = None
@@ -65,6 +68,7 @@ class UserUpdateRequest(BaseModel):
     is_doctor: Optional[bool] = None
     specialization: Optional[str] = None
     phone: Optional[str] = None
+    consultation_fee: Optional[float] = 500.0
     departments: Optional[list[str]] = None
 
 class TokenResponse(BaseModel):

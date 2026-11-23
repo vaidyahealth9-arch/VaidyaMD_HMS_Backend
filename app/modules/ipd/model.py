@@ -81,6 +81,7 @@ class IPDAdmission(Base):
     fluid_balances = relationship("IPDFluidBalance", back_populates="admission", cascade="all, delete-orphan")
     bill_items = relationship("IPDBillItem", back_populates="admission", cascade="all, delete-orphan")
     payments = relationship("IPDPayment", back_populates="admission", cascade="all, delete-orphan")
+    ot_records = relationship("IPDOperationTheatreRecord", back_populates="admission", cascade="all, delete-orphan")
 
 class NursingTask(Base):
     __tablename__ = "nursing_tasks"
@@ -141,6 +142,10 @@ class IPDOrder(Base):
     duration = Column(String(50), nullable=True)
     instructions = Column(Text, nullable=True)
     status = Column(String(50), default="Active")  # Active, Completed, Discontinued
+    start_date = Column(DateTime, default=datetime.utcnow)
+    stopped_at = Column(DateTime, nullable=True)
+    stop_reason = Column(String(255), nullable=True)
+    timing_slots = Column(JSONB, default=list)
     administered_logs = Column(JSONB, default=list)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -223,3 +228,56 @@ class IPDPayment(Base):
 
     admission = relationship("IPDAdmission", back_populates="payments")
     collected_by = relationship("User", foreign_keys=[collected_by_id])
+
+class IPDOperationTheatreRecord(Base):
+    __tablename__ = "ipd_ot_records"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("hospitals.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
+    admission_id = Column(UUID(as_uuid=True), ForeignKey("ipd_admissions.id", ondelete="CASCADE"), nullable=False, index=True)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    procedure_name = Column(String(255), nullable=False)
+    surgery_category = Column(String(50), default="Major")  # Major, Minor, Intermediate, Daycare
+    status = Column(String(50), default="Scheduled")  # Scheduled, Wheeled In, In Progress, Recovery, Completed, Cancelled
+
+    wheel_in_time = Column(DateTime, nullable=True)
+    wheel_out_time = Column(DateTime, nullable=True)
+    total_ot_hours = Column(Float, default=0.0)
+
+    primary_surgeon_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    assistant_surgeon_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    assistant_surgeon_name = Column(String(255), nullable=True)
+    anesthetist_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    anesthetist_name = Column(String(255), nullable=True)
+    scrub_nurse_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    circulating_nurse_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    guest_surgeons = Column(JSONB, nullable=True, default=list)
+
+    anesthesia_type = Column(String(100), default="General")
+    anesthesia_notes = Column(Text, nullable=True)
+
+    pre_op_diagnosis = Column(Text, nullable=True)
+    post_op_diagnosis = Column(Text, nullable=True)
+    operative_notes = Column(Text, nullable=True)
+    post_op_orders = Column(Text, nullable=True)
+
+    ot_hourly_rate = Column(Float, default=1500.0)
+    ot_room_charge = Column(Float, default=0.0)
+    procedure_fee = Column(Float, default=0.0)
+    surgeon_fee = Column(Float, default=0.0)
+    anesthesia_fee = Column(Float, default=0.0)
+    guest_surgeons_fee = Column(Float, default=0.0)
+    total_ot_charge = Column(Float, default=0.0)
+    is_billed = Column(Boolean, default=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    admission = relationship("IPDAdmission", back_populates="ot_records")
+    patient = relationship("Patient")
+    primary_surgeon = relationship("User", foreign_keys=[primary_surgeon_id])
+    assistant_surgeon = relationship("User", foreign_keys=[assistant_surgeon_id])
+    anesthetist = relationship("User", foreign_keys=[anesthetist_id])
+    scrub_nurse = relationship("User", foreign_keys=[scrub_nurse_id])
+    circulating_nurse = relationship("User", foreign_keys=[circulating_nurse_id])

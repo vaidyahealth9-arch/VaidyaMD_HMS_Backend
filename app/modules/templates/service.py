@@ -12,7 +12,32 @@ class ClinicalTemplateService:
     async def get_templates(self, plugin_id: str = None):
         query = select(ClinicalTemplate).where(ClinicalTemplate.is_active == True)
         if plugin_id:
-            query = query.where(ClinicalTemplate.plugin_id == plugin_id)
+            norm_plugin = plugin_id.lower().strip()
+            if norm_plugin in ("clinical_template", "proforma", "clinical", "proformas"):
+                query = query.where(
+                    (ClinicalTemplate.plugin_id.in_(["clinical_template", "proforma", "proformas", "fertility", "opd", "general"])) |
+                    (ClinicalTemplate.record_type.ilike("%clinical%")) |
+                    (ClinicalTemplate.record_type.ilike("%proforma%")) |
+                    (ClinicalTemplate.record_type.ilike("%workup%"))
+                )
+            elif norm_plugin in ("rx_template", "rx", "protocol"):
+                query = query.where(
+                    (ClinicalTemplate.plugin_id.in_(["rx_template", "rx", "protocol", "fertility", "opd"])) |
+                    (ClinicalTemplate.record_type.ilike("rx_%")) |
+                    (ClinicalTemplate.record_type.ilike("%protocol%"))
+                )
+            elif norm_plugin in ("opd_order_set", "order_set", "order_sets"):
+                query = query.where(
+                    (ClinicalTemplate.plugin_id.in_(["opd_order_set", "order_set", "order_sets", "fertility", "opd"])) |
+                    (ClinicalTemplate.record_type.ilike("os_%")) |
+                    (ClinicalTemplate.record_type.ilike("%order_set%")) |
+                    (ClinicalTemplate.record_type.ilike("%bundle%"))
+                )
+            else:
+                query = query.where(
+                    (ClinicalTemplate.plugin_id == plugin_id) |
+                    (ClinicalTemplate.record_type == plugin_id)
+                )
         
         result = await self.db.execute(query.order_by(ClinicalTemplate.title.asc()))
         return result.scalars().all()

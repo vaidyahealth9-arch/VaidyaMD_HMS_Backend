@@ -5,7 +5,7 @@ VaidyaMD HMS — User Model with Configurable Permission Profile & Branch
 import uuid
 import enum
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Boolean, Enum, ForeignKey
+from sqlalchemy import Column, String, DateTime, Boolean, Enum, ForeignKey, Float
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -41,6 +41,7 @@ class User(Base):
     reg_number = Column(String(100), comment="NMC or State Medical Council Registration Number")
     avatar_url = Column(String(500))
     phone = Column(String(20))
+    consultation_fee = Column(Float, default=500.0, nullable=True, comment="Doctor OPD consultation fee in INR")
     is_active = Column(Boolean, default=True)
 
     # Dynamic Permission Profile Link

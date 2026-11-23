@@ -109,6 +109,15 @@ class NursingTaskComplete(BaseModel):
 
 class RoundNoteCreate(BaseModel):
     doctor_id: Optional[UUID] = None
+    round_time: Optional[datetime] = None
+    subjective: Optional[str] = None
+    objective: Optional[str] = None
+    assessment: Optional[str] = None
+    plan: Optional[str] = None
+    notes: Optional[str] = None
+
+class RoundNoteUpdate(BaseModel):
+    round_time: Optional[datetime] = None
     subjective: Optional[str] = None
     objective: Optional[str] = None
     assessment: Optional[str] = None
@@ -123,6 +132,22 @@ class OrderCreate(BaseModel):
     frequency: Optional[str] = "OD"
     duration: Optional[str] = None
     instructions: Optional[str] = None
+    start_date: Optional[datetime] = None
+    timing_slots: Optional[List[str]] = None
+
+class OrderUpdate(BaseModel):
+    item_name: Optional[str] = None
+    dosage: Optional[str] = None
+    route: Optional[str] = None
+    frequency: Optional[str] = None
+    duration: Optional[str] = None
+    instructions: Optional[str] = None
+    start_date: Optional[datetime] = None
+    timing_slots: Optional[List[str]] = None
+
+class OrderStopPayload(BaseModel):
+    stopped_at: Optional[datetime] = None
+    stop_reason: Optional[str] = None
 
 class OrderStatusUpdate(BaseModel):
     status: str  # Active, Completed, Discontinued
@@ -132,6 +157,8 @@ class OrderAdministerPayload(BaseModel):
     status: str = "Given"  # Given, Withheld, Refused, Omitted
     notes: Optional[str] = None
     administered_by_name: Optional[str] = None
+    timing_slot: Optional[str] = None
+    scheduled_time: Optional[str] = None
 
 class FluidBalanceCreate(BaseModel):
     shift: str = "Morning"
@@ -174,4 +201,73 @@ class SettleBillItemsRequest(BaseModel):
     notes: Optional[str] = None
     is_discharge: bool = False
     discharge_summary: Optional[Dict[str, Any]] = None
+
+# OT (Operation Theatre) Schemas
+class OTRecordCreate(BaseModel):
+    procedure_name: str
+    surgery_category: Optional[str] = "Major"  # Major, Minor, Intermediate, Daycare
+    status: Optional[str] = "Scheduled"
+    wheel_in_time: Optional[datetime] = None
+    wheel_out_time: Optional[datetime] = None
+    total_ot_hours: Optional[float] = 0.0
+    primary_surgeon_id: Optional[UUID] = None
+    assistant_surgeon_id: Optional[UUID] = None
+    assistant_surgeon_name: Optional[str] = None
+    anesthetist_id: Optional[UUID] = None
+    anesthetist_name: Optional[str] = None
+    scrub_nurse_id: Optional[UUID] = None
+    circulating_nurse_id: Optional[UUID] = None
+    guest_surgeons: Optional[List[Dict[str, Any]]] = None
+    anesthesia_type: Optional[str] = "General"
+    anesthesia_notes: Optional[str] = None
+    pre_op_diagnosis: Optional[str] = None
+    post_op_diagnosis: Optional[str] = None
+    operative_notes: Optional[str] = None
+    post_op_orders: Optional[str] = None
+    ot_hourly_rate: Optional[float] = 1500.0
+    ot_room_charge: Optional[float] = 0.0
+    procedure_fee: Optional[float] = 0.0
+    surgeon_fee: Optional[float] = 0.0
+    anesthesia_fee: Optional[float] = 0.0
+    guest_surgeons_fee: Optional[float] = 0.0
+    total_ot_charge: Optional[float] = 0.0
+
+class OTRecordUpdate(BaseModel):
+    procedure_name: Optional[str] = None
+    surgery_category: Optional[str] = None
+    status: Optional[str] = None
+    wheel_in_time: Optional[datetime] = None
+    wheel_out_time: Optional[datetime] = None
+    total_ot_hours: Optional[float] = None
+    primary_surgeon_id: Optional[UUID] = None
+    assistant_surgeon_id: Optional[UUID] = None
+    assistant_surgeon_name: Optional[str] = None
+    anesthetist_id: Optional[UUID] = None
+    anesthetist_name: Optional[str] = None
+    scrub_nurse_id: Optional[UUID] = None
+    circulating_nurse_id: Optional[UUID] = None
+    guest_surgeons: Optional[List[Dict[str, Any]]] = None
+    anesthesia_type: Optional[str] = None
+    anesthesia_notes: Optional[str] = None
+    pre_op_diagnosis: Optional[str] = None
+    post_op_diagnosis: Optional[str] = None
+    operative_notes: Optional[str] = None
+    post_op_orders: Optional[str] = None
+    ot_hourly_rate: Optional[float] = None
+    ot_room_charge: Optional[float] = None
+    procedure_fee: Optional[float] = None
+    surgeon_fee: Optional[float] = None
+    anesthesia_fee: Optional[float] = None
+    guest_surgeons_fee: Optional[float] = None
+    total_ot_charge: Optional[float] = None
+
+class OTBillReviewPayload(BaseModel):
+    ot_room_charge: float = 0.0
+    procedure_fee: float = 0.0
+    surgeon_fee: float = 0.0
+    anesthesia_fee: float = 0.0
+    guest_surgeons_fee: float = 0.0
+    guest_surgeons: Optional[List[Dict[str, Any]]] = None
+    total_ot_charge: Optional[float] = None
+    notes: Optional[str] = None
 
