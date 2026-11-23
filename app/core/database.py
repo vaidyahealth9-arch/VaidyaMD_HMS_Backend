@@ -88,6 +88,7 @@ async def init_db():
         migrations = [
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS qualification VARCHAR(255);",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS reg_number VARCHAR(100);",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS consultation_fee DOUBLE PRECISION DEFAULT 500.0;",
             "ALTER TABLE treatment_cycle_types ADD COLUMN IF NOT EXISTS category VARCHAR(100);",
             "ALTER TABLE branches ADD COLUMN IF NOT EXISTS gstin VARCHAR(50);",
             "ALTER TABLE branches ADD COLUMN IF NOT EXISTS receipt_header JSONB DEFAULT '{}'::jsonb;",
@@ -97,6 +98,10 @@ async def init_db():
             "ALTER TABLE protocol_templates ADD COLUMN IF NOT EXISTS timeline_events JSONB DEFAULT '[]'::jsonb;",
             "ALTER TABLE patients ADD COLUMN IF NOT EXISTS marketing_person_name VARCHAR(255);",
             "ALTER TABLE patients ADD COLUMN IF NOT EXISTS referring_doctor VARCHAR(255);",
+            "ALTER TABLE ipd_orders ADD COLUMN IF NOT EXISTS start_date TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW();",
+            "ALTER TABLE ipd_orders ADD COLUMN IF NOT EXISTS stopped_at TIMESTAMP WITHOUT TIME ZONE;",
+            "ALTER TABLE ipd_orders ADD COLUMN IF NOT EXISTS stop_reason VARCHAR(255);",
+            "ALTER TABLE ipd_orders ADD COLUMN IF NOT EXISTS timing_slots JSONB DEFAULT '[]'::jsonb;",
             "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);",
             "ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);",
             # Unified Billing schema extensions
@@ -329,7 +334,55 @@ async def init_db():
                     );
                     CREATE INDEX IF NOT EXISTS ix_ipd_payments_adm ON ipd_payments(admission_id);
                     CREATE INDEX IF NOT EXISTS ix_ipd_payments_tenant ON ipd_payments(tenant_id);
+
+                    CREATE TABLE IF NOT EXISTS ipd_ot_records (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        tenant_id UUID NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE,
+                        branch_id UUID REFERENCES branches(id) ON DELETE SET NULL,
+                        admission_id UUID NOT NULL REFERENCES ipd_admissions(id) ON DELETE CASCADE,
+                        patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+                        procedure_name VARCHAR(255) NOT NULL,
+                        surgery_category VARCHAR(50) DEFAULT 'Major',
+                        status VARCHAR(50) DEFAULT 'Scheduled',
+                        wheel_in_time TIMESTAMP WITHOUT TIME ZONE,
+                        wheel_out_time TIMESTAMP WITHOUT TIME ZONE,
+                        total_ot_hours DOUBLE PRECISION DEFAULT 0.0,
+                        primary_surgeon_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                        assistant_surgeon_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                        anesthetist_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                        scrub_nurse_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                        circulating_nurse_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                        anesthesia_type VARCHAR(100) DEFAULT 'General',
+                        anesthesia_notes TEXT,
+                        pre_op_diagnosis TEXT,
+                        post_op_diagnosis TEXT,
+                        operative_notes TEXT,
+                        post_op_orders TEXT,
+                        ot_hourly_rate DOUBLE PRECISION DEFAULT 1500.0,
+                        ot_room_charge DOUBLE PRECISION DEFAULT 0.0,
+                        procedure_fee DOUBLE PRECISION DEFAULT 0.0,
+                        surgeon_fee DOUBLE PRECISION DEFAULT 0.0,
+                        anesthesia_fee DOUBLE PRECISION DEFAULT 0.0,
+                        total_ot_charge DOUBLE PRECISION DEFAULT 0.0,
+                        is_billed BOOLEAN DEFAULT FALSE,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_ipd_ot_records_adm ON ipd_ot_records(admission_id);
+                    CREATE INDEX IF NOT EXISTS ix_ipd_ot_records_tenant ON ipd_ot_records(tenant_id);
                 """))
         except Exception:
             pass
 
+
+        for alter_sql in [
+            "ALTER TABLE ipd_ot_records ADD COLUMN IF NOT EXISTS assistant_surgeon_name VARCHAR(255);",
+            "ALTER TABLE ipd_ot_records ADD COLUMN IF NOT EXISTS anesthetist_name VARCHAR(255);",
+            "ALTER TABLE ipd_ot_records ADD COLUMN IF NOT EXISTS guest_surgeons JSONB DEFAULT '[]'::jsonb;",
+            "ALTER TABLE ipd_ot_records ADD COLUMN IF NOT EXISTS guest_surgeons_fee DOUBLE PRECISION DEFAULT 0.0;",
+        ]:
+            try:
+                async with conn.begin_nested():
+                    await conn.execute(text(alter_sql))
+            except Exception:
+                pass

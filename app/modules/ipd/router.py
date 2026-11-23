@@ -13,8 +13,9 @@ from app.modules.ipd.schemas import (
     WardCreate, WardUpdate, BedCreate, BedUpdate, BedStatusUpdate,
     AdmissionCreate, AdmissionUpdate, DischargeRequest, TransferBedRequest,
     DischargeSummarySave, NursingTaskCreate, NursingTaskComplete, NursingTaskReschedule, VitalsFrequencyUpdate,
-    RoundNoteCreate, OrderCreate, OrderStatusUpdate, OrderAdministerPayload,
-    FluidBalanceCreate, BillItemCreate, PaymentCreate, SettleBillItemsRequest
+    RoundNoteCreate, RoundNoteUpdate, OrderCreate, OrderUpdate, OrderStopPayload, OrderStatusUpdate, OrderAdministerPayload,
+    FluidBalanceCreate, BillItemCreate, PaymentCreate, SettleBillItemsRequest,
+    OTRecordCreate, OTRecordUpdate, OTBillReviewPayload
 )
 
 router = APIRouter(
@@ -258,6 +259,19 @@ async def add_round_note(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.patch("/round-notes/{note_id}")
+@router.put("/round-notes/{note_id}")
+async def update_round_note(
+    note_id: UUID,
+    payload: RoundNoteUpdate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.update_round_note(note_id, payload, tenant_id=current_user.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 # -----------------------------------------------------------------------------
 # BEDSIDE ORDERS & eMAR
 # -----------------------------------------------------------------------------
@@ -290,6 +304,31 @@ async def update_order_status(
 ):
     try:
         return await service.update_order_status(order_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.patch("/orders/{order_id}")
+@router.put("/orders/{order_id}")
+async def update_order(
+    order_id: UUID,
+    payload: OrderUpdate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.update_order(order_id, payload, tenant_id=current_user.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.post("/orders/{order_id}/stop")
+async def stop_order(
+    order_id: UUID,
+    payload: OrderStopPayload,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.stop_order(order_id, payload, tenant_id=current_user.tenant_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -426,6 +465,18 @@ async def accrue_daily_charges(
 ):
     return await service.accrue_daily_charges(tenant_id=current_user.tenant_id)
 
+@router.post("/admissions/{admission_id}/accrue")
+@router.post("/admissions/{admission_id}/accrue/")
+async def accrue_admission_tariff(
+    admission_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.accrue_admission_tariff(admission_id, tenant_id=current_user.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 # -----------------------------------------------------------------------------
 # ROLLING BILL & PAYMENTS
 # -----------------------------------------------------------------------------
@@ -510,5 +561,56 @@ async def settle_invoice(
 ):
     try:
         return await service.settle_bill_items(admission_id, payload, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# -----------------------------------------------------------------------------
+# OPERATION THEATRE (OT)
+# -----------------------------------------------------------------------------
+@router.get("/admissions/{admission_id}/ot")
+@router.get("/admissions/{admission_id}/ot/")
+async def list_ot_records(
+    admission_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    return await service.ot.list_ot_records(admission_id, tenant_id=current_user.tenant_id)
+
+@router.post("/admissions/{admission_id}/ot", status_code=status.HTTP_201_CREATED)
+@router.post("/admissions/{admission_id}/ot/", status_code=status.HTTP_201_CREATED)
+async def create_ot_record(
+    admission_id: UUID,
+    payload: OTRecordCreate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.ot.create_ot_record(admission_id, payload, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.patch("/ot/{ot_record_id}")
+@router.put("/ot/{ot_record_id}")
+async def update_ot_record(
+    ot_record_id: UUID,
+    payload: OTRecordUpdate,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.ot.update_ot_record(ot_record_id, payload, tenant_id=current_user.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.post("/ot/{ot_record_id}/bill")
+@router.post("/ot/{ot_record_id}/bill/")
+async def post_ot_billing(
+    ot_record_id: UUID,
+    payload: OTBillReviewPayload,
+    current_user: User = Depends(get_current_user),
+    service: IPDService = Depends(get_ipd_service),
+):
+    try:
+        return await service.ot.post_ot_billing(ot_record_id, payload, current_user)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

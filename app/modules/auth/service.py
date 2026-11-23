@@ -47,6 +47,7 @@ class AuthService:
             reg_number=user.reg_number,
             avatar_url=user.avatar_url,
             phone=user.phone,
+            consultation_fee=getattr(user, 'consultation_fee', 500.0) or 500.0,
             tenant_id=user.tenant_id,
             branch_id=user.branch_id,
             permission_profile_id=user.permission_profile_id,
@@ -260,6 +261,7 @@ class AuthService:
             qualification=request.qualification,
             reg_number=request.reg_number,
             phone=request.phone,
+            consultation_fee=request.consultation_fee if request.consultation_fee is not None else 500.0,
             tenant_id=tenant_id,
             branch_id=request.branch_id,
             permission_profile_id=request.permission_profile_id,
@@ -299,6 +301,8 @@ class AuthService:
             user.reg_number = request.reg_number
         if request.phone is not None:
             user.phone = request.phone
+        if request.consultation_fee is not None:
+            user.consultation_fee = request.consultation_fee
         if request.branch_id is not None:
             user.branch_id = request.branch_id
         if request.permission_profile_id is not None:
@@ -329,6 +333,8 @@ class AuthService:
             user.specialization = update_data.specialization
         if update_data.phone is not None:
             user.phone = update_data.phone
+        if update_data.consultation_fee is not None:
+            user.consultation_fee = update_data.consultation_fee
         if update_data.departments is not None:
             user.departments = update_data.departments
 

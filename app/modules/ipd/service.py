@@ -7,20 +7,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func
 from uuid import UUID
 
-from app.core.timezone import get_now_ist, get_now_ist_naive, get_today_ist, to_ist_iso
+from app.core.timezone import IST, get_now_ist, get_now_ist_naive, get_today_ist, to_ist_iso
 from app.core.models import Patient, User
 from app.modules.ipd.model import (
     Ward, Bed, IPDAdmission, NursingTask,
     IPDRoundNote, IPDOrder, IPDFluidBalance,
-    IPDBillItem, IPDPayment
+    IPDBillItem, IPDPayment, IPDOperationTheatreRecord
 )
 from app.modules.ipd.schemas import (
     WardCreate, WardUpdate, BedCreate, BedUpdate, BedStatusUpdate,
     AdmissionCreate, AdmissionUpdate, DischargeRequest, TransferBedRequest,
     DischargeSummarySave, NursingTaskCreate, NursingTaskComplete, NursingTaskReschedule, VitalsFrequencyUpdate,
-    RoundNoteCreate, OrderCreate, OrderStatusUpdate, OrderAdministerPayload,
-    FluidBalanceCreate, BillItemCreate, PaymentCreate, SettleBillItemsRequest
+    RoundNoteCreate, RoundNoteUpdate, OrderCreate, OrderUpdate, OrderStopPayload, OrderStatusUpdate, OrderAdministerPayload,
+    FluidBalanceCreate, BillItemCreate, PaymentCreate, SettleBillItemsRequest,
+    OTRecordCreate, OTRecordUpdate, OTBillReviewPayload
 )
+from app.modules.ipd.ot_service import OTService
 
 def calculate_next_scheduled_time(base_time: datetime, frequency: str) -> Optional[datetime]:
     if not frequency:
@@ -66,6 +68,7 @@ def calculate_next_scheduled_time(base_time: datetime, frequency: str) -> Option
 class IPDService:
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.ot = OTService(db)
 
     # -------------------------------------------------------------------------
     # WARDS
@@ -353,7 +356,7 @@ class IPDService:
                 "id": str(r.id),
                 "doctor_id": str(r.doctor_id) if r.doctor_id else None,
                 "doctor_name": doc_user.name if doc_user else "Doctor",
-                "round_time": r.round_time.isoformat() if r.round_time else "",
+                "round_time": to_ist_iso(r.round_time) if r.round_time else "",
                 "subjective": r.subjective,
                 "objective": r.objective,
                 "assessment": r.assessment,
@@ -378,6 +381,10 @@ class IPDService:
                 "duration": o.duration,
                 "instructions": o.instructions,
                 "status": o.status,
+                "start_date": to_ist_iso(o.start_date) if getattr(o, "start_date", None) else to_ist_iso(o.created_at),
+                "stopped_at": to_ist_iso(o.stopped_at) if getattr(o, "stopped_at", None) else None,
+                "stop_reason": getattr(o, "stop_reason", None),
+                "timing_slots": getattr(o, "timing_slots", []) or [],
                 "administered_logs": o.administered_logs or [],
                 "ordered_by_name": ord_user.name if ord_user else None,
                 "created_at": to_ist_iso(o.created_at) if o.created_at else "",
@@ -478,6 +485,7 @@ class IPDService:
             "orders": orders,
             "fluid_balances": fluid_balances,
             "nursing_tasks": nursing_tasks,
+            "ot_records": await self.ot.list_ot_records(admission_id, admission.tenant_id),
         }
 
     async def update_admission(self, admission_id: UUID, payload: AdmissionUpdate):
@@ -630,7 +638,7 @@ class IPDService:
             notes.append({
                 "id": str(r.id),
                 "doctor_name": doc.name if doc else "Doctor",
-                "round_time": r.round_time.isoformat() if r.round_time else "",
+                "round_time": to_ist_iso(r.round_time) if r.round_time else "",
                 "subjective": r.subjective,
                 "objective": r.objective,
                 "assessment": r.assessment,
@@ -640,6 +648,22 @@ class IPDService:
             })
         return notes
 
+    async def update_round_note(self, note_id: UUID, payload: RoundNoteUpdate, tenant_id: Optional[UUID] = None):
+        query = select(IPDRoundNote).where(IPDRoundNote.id == note_id)
+        if tenant_id:
+            query = query.where(IPDRoundNote.tenant_id == tenant_id)
+        res = await self.db.execute(query)
+        note = res.scalars().first()
+        if not note:
+            raise ValueError("Round note not found")
+
+        update_data = payload.model_dump(exclude_unset=True)
+        for k, v in update_data.items():
+            setattr(note, k, v)
+        note.updated_at = get_now_ist_naive()
+        await self.db.flush()
+        return {"id": str(note.id), "message": "Doctor round note updated successfully"}
+
     # -------------------------------------------------------------------------
     # BEDSIDE ORDERS & eMAR
     # -------------------------------------------------------------------------
@@ -647,6 +671,25 @@ class IPDService:
         admission = await self.db.get(IPDAdmission, admission_id)
         if not admission:
             raise ValueError("Admission not found")
+
+        # Determine default scheduled timing slots based on frequency if not provided
+        slots = payload.timing_slots
+        if not slots:
+            freq_clean = (payload.frequency or "OD").strip().upper()
+            if freq_clean in ["BD", "BID", "1-0-1", "TWICE DAILY"]:
+                slots = ["08:00", "20:00"]
+            elif freq_clean in ["TID", "TDS", "1-1-1", "THRICE DAILY"]:
+                slots = ["08:00", "14:00", "20:00"]
+            elif freq_clean in ["QID", "1-1-1-1", "FOUR TIMES DAILY"]:
+                slots = ["06:00", "12:00", "18:00", "22:00"]
+            elif freq_clean in ["HS", "NIGHT", "0-0-1"]:
+                slots = ["21:00"]
+            elif freq_clean in ["STAT", "NOW"]:
+                slots = ["Immediate"]
+            elif freq_clean in ["SOS", "PRN"]:
+                slots = ["PRN"]
+            else:
+                slots = ["09:00"]
 
         order = IPDOrder(
             tenant_id=admission.tenant_id,
@@ -660,6 +703,8 @@ class IPDService:
             frequency=payload.frequency,
             duration=payload.duration,
             instructions=payload.instructions,
+            start_date=payload.start_date or get_now_ist_naive(),
+            timing_slots=slots,
             status="Active",
             administered_logs=[],
         )
@@ -687,7 +732,41 @@ class IPDService:
             "message": f"Inpatient order for '{order.item_name}' created successfully",
             "order_type": order.order_type,
             "status": order.status,
+            "timing_slots": order.timing_slots,
+            "start_date": to_ist_iso(order.start_date),
         }
+
+    async def update_order(self, order_id: UUID, payload: OrderUpdate, tenant_id: Optional[UUID] = None):
+        query = select(IPDOrder).where(IPDOrder.id == order_id)
+        if tenant_id:
+            query = query.where(IPDOrder.tenant_id == tenant_id)
+        res = await self.db.execute(query)
+        order = res.scalars().first()
+        if not order:
+            raise ValueError("Order not found")
+
+        update_data = payload.model_dump(exclude_unset=True)
+        for k, v in update_data.items():
+            setattr(order, k, v)
+        order.updated_at = get_now_ist_naive()
+        await self.db.flush()
+        return {"id": str(order.id), "message": f"Order '{order.item_name}' updated successfully."}
+
+    async def stop_order(self, order_id: UUID, payload: OrderStopPayload, tenant_id: Optional[UUID] = None):
+        query = select(IPDOrder).where(IPDOrder.id == order_id)
+        if tenant_id:
+            query = query.where(IPDOrder.tenant_id == tenant_id)
+        res = await self.db.execute(query)
+        order = res.scalars().first()
+        if not order:
+            raise ValueError("Order not found")
+
+        order.status = "Discontinued"
+        order.stopped_at = payload.stopped_at or get_now_ist_naive()
+        order.stop_reason = payload.stop_reason or "Discontinued by attending doctor"
+        order.updated_at = get_now_ist_naive()
+        await self.db.flush()
+        return {"id": str(order.id), "message": f"Medication order '{order.item_name}' stopped."}
 
     async def update_order_status(self, order_id: UUID, payload: OrderStatusUpdate):
         order = await self.db.get(IPDOrder, order_id)
@@ -705,15 +784,28 @@ class IPDService:
             raise ValueError("Order not found")
 
         logs = list(order.administered_logs or [])
+        if payload.status in ["Unchecked", "Reverted", "Undo"]:
+            if payload.timing_slot:
+                logs = [l for l in logs if l.get("timing_slot") != payload.timing_slot]
+            elif logs:
+                logs.pop()
+            order.administered_logs = logs
+            await self.db.flush()
+            return {"message": f"Medication dose for '{payload.timing_slot or 'slot'}' reverted successfully", "logs": logs}
+
         logs.append({
             "id": uuid.uuid4().hex[:8],
             "timestamp": to_ist_iso(get_now_ist()),
             "status": payload.status,
             "nurse_name": payload.administered_by_name or user.name,
             "nurse_id": str(user.id),
+            "timing_slot": payload.timing_slot,
+            "scheduled_time": payload.scheduled_time,
             "notes": payload.notes,
         })
         order.administered_logs = logs
+        await self.db.flush()
+        return {"message": f"Medication dose marked as '{payload.status}'", "logs": logs}
         await self.db.flush()
         return {"message": f"Medication dose marked as '{payload.status}'", "logs": logs}
 
@@ -733,6 +825,10 @@ class IPDService:
                 "duration": o.duration,
                 "instructions": o.instructions,
                 "status": o.status,
+                "start_date": to_ist_iso(o.start_date) if getattr(o, "start_date", None) else to_ist_iso(o.created_at),
+                "stopped_at": to_ist_iso(o.stopped_at) if getattr(o, "stopped_at", None) else None,
+                "stop_reason": getattr(o, "stop_reason", None),
+                "timing_slots": getattr(o, "timing_slots", []) or [],
                 "administered_logs": o.administered_logs or [],
                 "ordered_by_name": ord_user.name if ord_user else None,
                 "created_at": to_ist_iso(o.created_at) if o.created_at else "",
@@ -1700,5 +1796,140 @@ class IPDService:
             "success": True,
             "message": f"Accrued {items_created} daily charge line items across {accrued_count} active inpatient admissions.",
             "admissions_accrued": accrued_count,
+            "items_created": items_created,
+        }
+
+    async def accrue_admission_tariff(self, admission_id: UUID, tenant_id: Optional[UUID] = None):
+        today = get_today_ist()
+        query = select(IPDAdmission).where(IPDAdmission.id == admission_id)
+        if tenant_id:
+            query = query.where(IPDAdmission.tenant_id == tenant_id)
+        adm = (await self.db.execute(query)).scalars().first()
+        if not adm:
+            raise ValueError("Admission not found")
+
+        bed = await self.db.get(Bed, adm.bed_id)
+        if not bed:
+            raise ValueError("Patient has no bed assigned")
+        ward = await self.db.get(Ward, bed.ward_id) if bed.ward_id else None
+        doctor = await self.db.get(User, adm.admitting_doctor_id) if adm.admitting_doctor_id else None
+
+        # Check if automated daily charges already created today for this admission
+        check_q = select(IPDBillItem).where(
+            IPDBillItem.admission_id == adm.id,
+            IPDBillItem.is_automated == True,
+            IPDBillItem.item_type == "room_rent",
+            func.date(IPDBillItem.billing_date) == today
+        )
+        already_done = (await self.db.execute(check_q)).scalars().first()
+        if already_done:
+            return {
+                "success": False,
+                "message": f"Today's ({today.strftime('%d %b %Y')}) room and clinical tariff has already been accrued for this patient.",
+                "already_accrued": True,
+            }
+
+        day_total = 0.0
+        items_created = 0
+
+        # 1. Room rent
+        room_rate = float(bed.daily_rate) if bed.daily_rate else (float(ward.base_charge_per_day) if ward else 2000.0)
+        item_room = IPDBillItem(
+            tenant_id=adm.tenant_id,
+            branch_id=adm.branch_id,
+            admission_id=adm.id,
+            item_type="room_rent",
+            category="Room & Bed",
+            service_code="IPD-ROOM",
+            item_name=f"Daily Bed Charges: Ward {ward.name if ward else 'General'} - Bed {bed.bed_number}",
+            quantity=1.0,
+            unit_price=room_rate,
+            total_price=room_rate,
+            is_automated=True,
+            billing_date=get_now_ist_naive(),
+            source_module="ipd_manual_accrual",
+            notes=f"Daily bed accrual for {today.strftime('%d %b %Y')}",
+        )
+        self.db.add(item_room)
+        day_total += room_rate
+        items_created += 1
+
+        # 2. Nursing care
+        nursing_rate = float(getattr(ward, 'nursing_charge_per_day', 500.0) or 500.0) if ward else 500.0
+        item_nursing = IPDBillItem(
+            tenant_id=adm.tenant_id,
+            branch_id=adm.branch_id,
+            admission_id=adm.id,
+            item_type="nursing_care",
+            category="Nursing Care",
+            service_code="IPD-NURSING",
+            item_name=f"Daily Inpatient Nursing Care & Monitoring ({ward.name if ward else 'Ward'})",
+            quantity=1.0,
+            unit_price=nursing_rate,
+            total_price=nursing_rate,
+            is_automated=True,
+            billing_date=get_now_ist_naive(),
+            source_module="ipd_manual_accrual",
+            notes=f"Daily nursing charge for {today.strftime('%d %b %Y')}",
+        )
+        self.db.add(item_nursing)
+        day_total += nursing_rate
+        items_created += 1
+
+        # 3. Doctor Rounding
+        doc_rate = float(getattr(adm, 'attending_doctor_charge_per_day', 500.0) or 500.0)
+        doc_name = doctor.name if doctor else "Attending Physician"
+        clean_doc_title = doc_name if doc_name.lower().startswith('dr') else f"Dr. {doc_name}"
+        item_doc = IPDBillItem(
+            tenant_id=adm.tenant_id,
+            branch_id=adm.branch_id,
+            admission_id=adm.id,
+            item_type="doctor_consultation",
+            category="Doctor Consultation",
+            service_code="IPD-DOC-VISIT",
+            item_name=f"Inpatient Daily Physician Rounding - {clean_doc_title}",
+            quantity=1.0,
+            unit_price=doc_rate,
+            total_price=doc_rate,
+            is_automated=True,
+            billing_date=get_now_ist_naive(),
+            source_module="ipd_manual_accrual",
+            notes=f"Physician rounding fee for {today.strftime('%d %b %Y')}",
+        )
+        self.db.add(item_doc)
+        day_total += doc_rate
+        items_created += 1
+
+        # 4. Daily Diet if enabled
+        if getattr(adm, 'daily_diet_enabled', False):
+            diet_rate = float(getattr(ward, 'diet_charge_per_day', 300.0) or 300.0) if ward else 300.0
+            item_diet = IPDBillItem(
+                tenant_id=adm.tenant_id,
+                branch_id=adm.branch_id,
+                admission_id=adm.id,
+                item_type="diet",
+                category="Diet & Nutrition",
+                service_code="IPD-DIET",
+                item_name="Inpatient Daily Diet & Nutrition Plan",
+                quantity=1.0,
+                unit_price=diet_rate,
+                total_price=diet_rate,
+                is_automated=True,
+                billing_date=get_now_ist_naive(),
+                source_module="ipd_manual_accrual",
+                notes=f"Daily meal plan for {today.strftime('%d %b %Y')}",
+            )
+            self.db.add(item_diet)
+            day_total += diet_rate
+            items_created += 1
+
+        adm.total_accrued_amount = round((adm.total_accrued_amount or 0.0) + day_total, 2)
+        adm.last_accrual_date = get_now_ist_naive()
+
+        await self.db.flush()
+        return {
+            "success": True,
+            "message": f"Successfully accrued ₹{day_total:,.2f} ({items_created} items) for today ({today.strftime('%d %b %Y')}).",
+            "day_total": day_total,
             "items_created": items_created,
         }
